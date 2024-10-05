@@ -2,7 +2,7 @@
 #
 # Dicke model
 # Alex Heinrich
-# Sept. 2024
+# Oct. 2024
 #
 ########################################################################################################################################################
 
@@ -142,14 +142,14 @@ from itertools import permutations
 ########################################################################################################################################################
 # Parameters
 ## Set these here
-ω             = 0.1 # field frequency; single-mode field, like first-order waves in a box (10**16 1/s)
+ω             = 0.01 # field frequency; single-mode field, like first-order waves in a box (10**16 1/s)
 ω0            = 10   # atomic frequency; single frequency for the transition |n⟩ → |n ± 1⟩ for a harmonic oscillator (10**6 1/s)
-ℏ             = 1   # Planck's constant (1.054571817 * 10**(-34) J∙s)
-m             = 1   # mass
+ℏ             = 1    # Planck's constant (1.054571817 * 10**(-34) J∙s)
+m             = 1    # mass
 
 ## Set these in main()
-n_max_default = 3   # number of energy levels, including vacuum state; sets Fock space
-N_default     = 3   # number of particles; sets spin space: integer number of m_J for |m_J ,m_J, ..., m_J⟩
+n_max_default = 48   # number of energy levels, including vacuum state; sets Fock space
+N_default     = 4    # number of particles; sets spin space: integer number of m_J for |m_J ,m_J, ..., m_J⟩
 
 ## These are automatic
 J             = lambda N: N/2             # total spin of the system: use an integer for bosons
@@ -338,10 +338,10 @@ def Dicke_Hamiltonian_bif(N):
     
     global H, H_field, H_atom, H_int
 
-    H_field = ℏ * ω  * (a_dag @ a + a @ a)         # counts the energy of each photon; (1/2)*np.eye(a.shape[0])
-    H_atom  = ℏ * ω0 * J_z                 # counts the energy of each spin
-    H_int   = ℏ / np.sqrt(N) * (a + a_dag) @ J_x   # quantifies the interaction between the atoms and the field
-    H       = lambda λ: H_field + H_atom + λ*H_int # sums the total energy and sets the interaction strength
+    H_field = ℏ * ω  * (a_dag @ a + a @ a)
+    H_atom  = ℏ * ω0 * J_z
+    H_int   = ℏ / np.sqrt(N) * (a + a_dag) @ J_x
+    H       = lambda λ: H_field + H_atom + λ*H_int
 
 ########################################################################################################################################################
 # Operations
@@ -399,6 +399,19 @@ def expectation(operator, state, single_state=True):
             expectation_array.append(np.array(temp_list_1).T)
         return np.array(expectation_array)
 
+def uncertainty(states, operator):
+    """ Calculates the standard deviation of a given operator and a set of states. """
+
+    expectations, output = [[], []], []
+    expectations[0] = expectation(operator,          states, single_state=False)
+    expectations[1] = expectation(operator@operator, states, single_state=False)
+    for i in range(len(expectations[0])):
+        cache = []
+        for j in range(len(list(expectations[0][i]))):
+            cache.append(np.sqrt(list(expectations[1])[i][j]-list(expectations[0])[i][j]**2))
+        output.append(cache)
+    return np.array(output)
+
 def partial_trace(ρ, dim_A, dim_B, trace_out):
     """ Computes the partial trace of a matrix.
 
@@ -422,6 +435,37 @@ def partial_trace(ρ, dim_A, dim_B, trace_out):
 
 ########################################################################################################################################################
 # Algorithms
+def plot_n_and_Jz(variable_set, states, quantum_numbers=None):
+    """ Generate and plot ⟨n⟩ and ⟨Jz⟩ for each ground state as a function of λ. """
+        
+    # Calculate expectation values
+    n_expectations   = expectation(a_dag@a, states, single_state=False)
+    J_x_expectations = expectation(J_x,     states, single_state=False)
+    J_y_expectations = expectation(J_y,     states, single_state=False)
+    J_z_expectations = expectation(J_z,     states, single_state=False)
+    
+    # Just a weird bug fix
+    J_y_expectations = np.real(J_y_expectations)
+    
+    plot_results([[(f"$λ$", f"$⟨n⟩$"),   (variable_set, n_expectations),   (0, 1), ('plot')],
+                  [(f"$λ$", f"$ΔJ_x$"), (variable_set, ΔJ_x), (1, 0), ('plot')],
+                  [(f"$λ$", f"$⟨J_z⟩$"), (variable_set, J_z_expectations), (1, 2), ('plot')]],
+                  quantum_numbers = quantum_numbers)
+
+def plot_spectrum(variable_set, states, quantum_numbers=None):
+    """ Generate and plot energy eigenvalues.
+    
+        Optional
+        --------
+        Subtract the ground state energy from all eigenvalues
+            for i in range(len(states[0])):
+                for j in range(len(states[0][0])): 
+                    val = states[0][i].copy()[0]
+                    states[0][i][-(j+1)] -= val """
+
+    plot_results([[(f"$λ$", f"$E$"), (variable_set, states[0]), (0, 0), ('plot')]],
+                   quantum_numbers = quantum_numbers)
+
 def init_Dicke_model(n_max, N):
     """ Creates operators and the Hamiltonian for the basic Dicke model with variable coupling strength.
         
@@ -436,7 +480,7 @@ def init_Dicke_model(n_max, N):
     create_parity_operator()           # creates parity operator for sorting
     Dicke_Hamiltonian(N)               # uses global operators to construct the full Hamiltonian
 
-def run_SEOP_Hamiltonian():
+def SEOP_Dicke_model():
     """ Spin-exchange optical pumping model
     
         Hamiltonian
@@ -491,15 +535,15 @@ def run_SEOP_Hamiltonian():
     P = np.real(P)
 
     # Create Hamiltonian
-    H_field = ℏ * ω  * (a_dag @ a)         # counts the energy of each photon; (1/2)*np.eye(a.shape[0])
-    H_I     = ℏ * ω0 * I_z                 # counts the energy of each spin
-    H_S     = ℏ * ω0 * S_z                 # counts the energy of each spin
-    H_spin  = ℏ * ω0 * I_z @ S_z           # counts the energy of each spin
-    H_int   = ℏ / np.sqrt(N) * (a + a_dag) @ S_x   # quantifies the interaction between the atoms and the field
-    H       = lambda λ: H_field + H_I + H_S + H_spin + λ*H_int # sums the total energy and sets the interaction strength
+    H_field = ℏ * ω  * (a_dag @ a)
+    H_I     = ℏ * ω0 * I_z
+    H_S     = ℏ * ω0 * S_z
+    H_spin  = ℏ * ω0 * I_z @ S_z
+    H_int   = ℏ / np.sqrt(N) * (a + a_dag) @ S_x
+    H       = lambda λ: H_field + H_I + H_S + H_spin + λ*H_int
 
     # Generate all eigenstates and eigenvalues
-    variable_set = np.linspace(0, 5*λ_critical, 101)
+    variable_set = np.linspace(0, 10*λ_critical, 101)
     states       = calculate_states(variable_set)
 
     # Sort eigenstates and eigenvalues
@@ -524,10 +568,10 @@ def run_SEOP_Hamiltonian():
                       quantum_numbers = quantum_numbers)
     
     # Make a calculation
-    #plot_spectrum(variable_set, states, quantum_numbers)
+    plot_spectrum(variable_set, states, quantum_numbers)
     plot_n_S(variable_set, states, quantum_numbers)
 
-def run_2_spin_Hamiltonian():
+def two_spin_Dicke_model():
     """ Spin-exchange optical pumping model
     
         Hamiltonian
@@ -582,13 +626,13 @@ def run_2_spin_Hamiltonian():
     P = np.real(P)
 
     # Create Hamiltonian
-    H_field = ℏ * ω  * (a_dag @ a)         # counts the energy of each photon; (1/2)*np.eye(a.shape[0])
-    H_spin  = ℏ * ω0 * (S_z + I_z)                 # counts the energy of each spin
-    H_int   = ℏ / np.sqrt(N) * (a + a_dag) @ (S_x - I_x)   # quantifies the interaction between the atoms and the field
-    H       = lambda λ: H_field + H_spin + λ*H_int # sums the total energy and sets the interaction strength
+    H_field = ℏ * ω  * (a_dag @ a)
+    H_spin  = ℏ * ω0 * (S_z + I_z)
+    H_int   = ℏ / np.sqrt(N) * (a + a_dag) @ (S_x - I_x)
+    H       = lambda λ: H_field + H_spin + λ*H_int
 
     # Generate all eigenstates and eigenvalues
-    variable_set = np.linspace(0, 5*λ_critical, 201)
+    variable_set = np.linspace(0, 5*λ_critical, 101)
     states       = calculate_states(variable_set)
 
     # Sort eigenstates and eigenvalues
@@ -615,39 +659,6 @@ def run_2_spin_Hamiltonian():
     # Make a calculation
     #plot_spectrum(variable_set, states, quantum_numbers)
     plot_n_S(variable_set, states, quantum_numbers)
-
-def plot_n_and_Jz(variable_set, states, quantum_numbers=None):
-    """ Generate and plot ⟨n⟩ and ⟨Jz⟩ for each ground state as a function of λ. """
-        
-    # Calculate expectation values
-    n_expectations   = expectation(a_dag@a, states, single_state=False)
-    J_x_expectations = expectation(J_x,     states, single_state=False)
-    J_y_expectations = expectation(J_y,     states, single_state=False)
-    J_z_expectations = expectation(J_z,     states, single_state=False)
-
-    # Just a weird bug fix
-    J_y_expectations = np.real(J_y_expectations)
-    
-    plot_results([[(f"$λ$", f"$⟨n⟩$"),   (variable_set, n_expectations),   (0, 1), ('plot')],
-                  [(f"$λ$", f"$⟨J_x⟩$"), (variable_set, J_x_expectations), (1, 0), ('plot')],
-                  [(f"$λ$", f"$⟨J_y⟩$"), (variable_set, J_y_expectations), (1, 1), ('plot')],
-                  [(f"$λ$", f"$⟨J_z⟩$"), (variable_set, J_z_expectations), (1, 2), ('plot')]],
-                  quantum_numbers = quantum_numbers)
-
-def plot_spectrum(variable_set, states, quantum_numbers=None):
-    """ Generate and plot energy eigenvalues.
-    
-        Optional
-        --------
-        Subtract the ground state energy from all eigenvalues
-            for i in range(len(states[0])):
-                for j in range(len(states[0][0])): 
-                    val = states[0][i].copy()[0]
-                    states[0][i][-(j+1)] -= val """
-
-    # Plot results
-    plot_results([[(f"$λ$", f"$E$"), (variable_set, states[0]), (0, 0), ('plot')]],
-                   quantum_numbers = quantum_numbers)
 
 def examples(specific_example=0):
     """ Run a preset example.
@@ -686,10 +697,10 @@ def examples(specific_example=0):
     elif specific_example == 1:
     
         # Set frequencies
-        ω, ω0 = 0.1, 10
+        ω, ω0 = 1, 1
         
         # Initialize model
-        init_Dicke_model(n_max=24, N=2)
+        init_Dicke_model(n_max=48, N=4)
 
         # Generate all eigenstates and eigenvalues
         variable_set = np.linspace(0, 3*λ_critical, 101)
@@ -699,7 +710,7 @@ def examples(specific_example=0):
         states, quantum_numbers = quantum_numbers_sorting(states, sort='P', secondary_sort='E')
 
         # Select specific eigenstates
-        selected_states = [0, int(len(states[0][0])/2)]
+        selected_states = [0, 1, int(len(states[0][0])/2), int(len(states[0][0])/2)+1]
         states          = [states[0][:,selected_states], states[1][:,:,selected_states]]
         quantum_numbers = quantum_numbers[:,selected_states]
 
@@ -729,7 +740,7 @@ def examples(specific_example=0):
     elif specific_example == 3:
     
         # Set frequencies
-        ω, ω0 = 1, 1
+        ω, ω0 = 0.1, 10
         
         # Initialize model
         init_Dicke_model(n_max=48, N=4)
@@ -759,7 +770,7 @@ def examples(specific_example=0):
         Dicke_Hamiltonian_bif(N)           # uses global operators to construct the full Hamiltonian
 
         # Generate all eigenstates and eigenvalues
-        variable_set = np.linspace(0, 10*λ_critical, 501)
+        variable_set = np.linspace(0, 10*λ_critical, 101)
         states       = calculate_states(variable_set)
 
         # Sort eigenstates and eigenvalues
@@ -1295,9 +1306,9 @@ def create_x_p_operators():
 def main():
     """ Ideally only used to develop algorithms. """
     
-    #examples(1)
-    #run_SEOP_Hamiltonian()
-    run_2_spin_Hamiltonian()
+    examples()
+    #SEOP_Dicke_model()
+    #two_spin_Dicke_model()
     
     # Initialize model
     #init_Dicke_model(n_max_default, N_default)
