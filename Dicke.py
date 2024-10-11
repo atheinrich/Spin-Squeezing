@@ -128,6 +128,7 @@
 import matplotlib.pyplot as plt                  # plotting
 from matplotlib.gridspec import GridSpec         # plotting
 from tqdm import tqdm                            # loading bar
+from mpl_toolkits.mplot3d import Axes3D          # WIP
 
 ## Computation
 import numpy as np                               # tensor algebra
@@ -325,24 +326,6 @@ def Dicke_Hamiltonian(N):
     H_int   = ℏ / np.sqrt(N) * (a + a_dag) @ J_x   # quantifies the interaction between the atoms and the field
     H       = lambda λ: H_field + H_atom + λ*H_int # sums the total energy and sets the interaction strength
 
-def Dicke_Hamiltonian_bif(N):
-    """ Constructs the Hamiltonian given global operator values.
-        
-        Parameters
-        ----------
-        N : integer; total number of particles
-        
-        Features
-        --------
-        λ : integer; coupling strength """
-    
-    global H, H_field, H_atom, H_int
-
-    H_field = ℏ * ω  * (a_dag @ a + a @ a)
-    H_atom  = ℏ * ω0 * J_z
-    H_int   = ℏ / np.sqrt(N) * (a + a_dag) @ J_x
-    H       = lambda λ: H_field + H_atom + λ*H_int
-
 ########################################################################################################################################################
 # Operations
 def eigenstates(matrix, ground_state=False):
@@ -448,7 +431,7 @@ def plot_n_and_Jz(variable_set, states, quantum_numbers=None):
     J_y_expectations = np.real(J_y_expectations)
     
     plot_results([[(f"$λ$", f"$⟨n⟩$"),   (variable_set, n_expectations),   (0, 1), ('plot')],
-                  [(f"$λ$", f"$ΔJ_x$"), (variable_set, ΔJ_x), (1, 0), ('plot')],
+                  [(f"$λ$", f"$⟨J_x⟩$"), (variable_set, J_x_expectations), (1, 0), ('plot')],
                   [(f"$λ$", f"$⟨J_z⟩$"), (variable_set, J_z_expectations), (1, 2), ('plot')]],
                   quantum_numbers = quantum_numbers)
 
@@ -674,11 +657,12 @@ def examples(specific_example=0):
     
     global ω, ω0
     
-    # Example 0
+    # Example 0: simple spectrum
     if specific_example == 0:
     
         # Set frequencies
         ω, ω0 = 1, 1
+        λ_critical = (ω * ω0)**(1/2)/2
     
         # Initialize model
         init_Dicke_model(n_max=2, N=1)
@@ -693,14 +677,14 @@ def examples(specific_example=0):
         # Make a calculation
         plot_spectrum(variable_set, states, quantum_numbers)
     
-    # Example 1
+    # Example 1: cavity occupation
     elif specific_example == 1:
     
         # Set frequencies
-        ω, ω0 = 1, 1
+        ω, ω0 = 0.1, 10
         
         # Initialize model
-        init_Dicke_model(n_max=48, N=4)
+        init_Dicke_model(n_max=24, N=2)
 
         # Generate all eigenstates and eigenvalues
         variable_set = np.linspace(0, 3*λ_critical, 101)
@@ -710,18 +694,19 @@ def examples(specific_example=0):
         states, quantum_numbers = quantum_numbers_sorting(states, sort='P', secondary_sort='E')
 
         # Select specific eigenstates
-        selected_states = [0, 1, int(len(states[0][0])/2), int(len(states[0][0])/2)+1]
+        selected_states = [0, int(len(states[0][0])/2)]
         states          = [states[0][:,selected_states], states[1][:,:,selected_states]]
         quantum_numbers = quantum_numbers[:,selected_states]
 
         # Make a calculation
         plot_n_and_Jz(variable_set, states, quantum_numbers)
     
-    # Example 2
+    # Example 2: dense spectrum
     elif specific_example == 2:
     
         # Set frequencies
         ω, ω0 = 0.1, 10
+        λ_critical = (ω * ω0)**(1/2)/2
         
         # Initialize model
         init_Dicke_model(n_max=48, N=4)
@@ -736,11 +721,12 @@ def examples(specific_example=0):
         # Make a calculation
         plot_spectrum(variable_set, states, quantum_numbers)
     
-    # Example 3
+    # Example 3: resonance (avoided crossings)
     elif specific_example == 3:
     
         # Set frequencies
-        ω, ω0 = 0.1, 10
+        ω, ω0 = 1, 1
+        λ_critical = (ω * ω0)**(1/2)/2
         
         # Initialize model
         init_Dicke_model(n_max=48, N=4)
@@ -755,11 +741,12 @@ def examples(specific_example=0):
         # Make a calculation
         plot_spectrum(variable_set, states, quantum_numbers)
     
-    # Example 4
+    # Example 4: bifurcations
     elif specific_example == 4:
     
         # Set frequencies
         ω, ω0 = 0.1, 10
+        λ_critical = (ω * ω0)**(1/2)/2
         
         # Initialize model
         n_max, N = 48, 4
@@ -767,7 +754,10 @@ def examples(specific_example=0):
         create_a_operators(n_max)          # creates a and a_dag given number of available energy levels
         compute_tensor_products(n_max, N)  # updates J_p, J_m, J_x, J_y, J_z, a, and a_dag to the full Hilbert space
         create_parity_operator()           # creates parity operator for sorting
-        Dicke_Hamiltonian_bif(N)           # uses global operators to construct the full Hamiltonian
+        H_field = ℏ * ω  * (a_dag @ a + a @ a)
+        H_atom  = ℏ * ω0 * J_z
+        H_int   = ℏ / np.sqrt(N) * (a + a_dag) @ J_x
+        H       = lambda λ: H_field + H_atom + λ*H_int
 
         # Generate all eigenstates and eigenvalues
         variable_set = np.linspace(0, 10*λ_critical, 101)
@@ -778,6 +768,32 @@ def examples(specific_example=0):
 
         # Make a calculation
         plot_spectrum(variable_set, states, quantum_numbers)
+    
+    # Development
+    elif specific_example == 5:
+    
+        # Set frequencies
+        ω, ω0 = 0.1, 10
+        λ_critical = (ω * ω0)**(1/2)/2
+        
+        # Initialize model
+        init_Dicke_model(n_max=24, N=4)
+
+        # Generate all eigenstates and eigenvalues
+        variable_set = np.linspace(0.01, 10*λ_critical, 2)
+        states       = calculate_states(variable_set)
+
+        # Sort eigenstates and eigenvalues
+        states, quantum_numbers = quantum_numbers_sorting(states, sort='P', secondary_sort='E')
+
+        # Select specific eigenstates
+        selected_states = [0, int(len(states[0][0])/2)] # [0, 1, int(len(states[0][0])/2), int(len(states[0][0])/2)+1]
+        states          = [states[0][:,selected_states], states[1][:,:,selected_states]]
+        quantum_numbers = quantum_numbers[:,selected_states]
+
+        # Make a calculation
+        #plot_n_and_Jz(variable_set, states, quantum_numbers)
+        Lindblad(variable_set, states, quantum_numbers, plot_mode="2D")
     
     else:
         print('There are no examples with this value.')
@@ -795,7 +811,7 @@ def calculate_states(variable_set, ground_state=False):
         eigenvectors.append(eigenvector)  
     return [np.array(eigenvalues), np.array(eigenvectors)] 
 
-def plot_results(results, quantum_numbers=None):
+def plot_results(results, quantum_numbers=None, plot_mode="2D"):
     """ Plots input data using GridSpec.
         
         Parameters
@@ -810,57 +826,70 @@ def plot_results(results, quantum_numbers=None):
         values  : (x_values,  y_values);     ex. (x_array, y_array)
         indices : (row_index, column_index); ex. (0, 2)
         style   : (plot_type);               ex. ('plot') or ('contour') """
-
-    # Initialize plots after setting grid size
-    try:
-        max_row = max(item[2][0] for item in results) + 1
-        max_col = max(item[2][1] for item in results) + 1
-    except:
-        max_row = 1
-        max_col = 1
-    fig = plt.figure(figsize=(3*max_col, 3*max_row))
-    gs  = GridSpec(max_row, max_col, figure=fig)
-    #plt.style.use('dark_background')
     
-    # Define color map
-    color_map = {1: 'Reds_r', -1: 'Blues_r'}
-    def get_colormap_color(cmap_name, column, num_columns):
-        cmap = plt.get_cmap(cmap_name)
-        normalized_value = column / num_columns
-        capped_value = min(normalized_value, 0.9)
-        return cmap(capped_value) # Returns RGBA color
-    
-    # Sort through each individual plot
-    for labels, values, indices, style in tqdm(results, desc=f"{'plotting results':<35}"):
-                
-        # Initialize the given plot and assign axis labels
-        ax = fig.add_subplot(gs[indices[0], indices[1]])
-        ax.set_xlabel(labels[0], fontsize=16)
-        ax.set_ylabel(labels[1], fontsize=16)
-
-        # Plot with specified coloring
-        if quantum_numbers is not None:
-
-            # Sort through y-values
-            for i in range(len(values[1][0])):
-                color_category = color_map.get(int(quantum_numbers[0][i][0]))
-                set_color = get_colormap_color(color_category, i+1, len(values[1][0]))
-            
-                # Perform plotting based on style
-                if style == 'plot':
-                    ax.plot(values[0], values[1][:, i], color=set_color)
-                elif style == 'contour':
-                    ax.contourf(values[0], values[1][:, i], values[2], 100)
+    if plot_mode == "2D":
+        # Initialize grid size based on 2D plot indices
+        try:
+            max_row = max(item[2][0] for item in results) + 1
+            max_col = max(item[2][1] for item in results) + 1
+        except:
+            max_row = 1
+            max_col = 1
         
-        # Plot without specified coloring
-        else:
-            if style == 'plot':
-                ax.plot(values[0], values[1])
-            elif style == 'contour':
-                ax.contourf(values[0], values[1], values[2], 100)
-    
-    plt.tight_layout()
-    plt.show()
+        # Initialize figure with GridSpec
+        fig = plt.figure(figsize=(3*max_col, 3*max_row))
+        gs  = GridSpec(max_row, max_col, figure=fig)
+        
+        # Define color map
+        color_map = {1: 'Reds_r', -1: 'Blues_r'}
+        def get_colormap_color(cmap_name, column, num_columns):
+            cmap = plt.get_cmap(cmap_name)
+            normalized_value = column / num_columns
+            capped_value = min(normalized_value, 0.9)
+            return cmap(capped_value)  # Returns RGBA color
+
+        # Loop through results for individual 2D plots
+        for labels, values, indices, style in tqdm(results, desc=f"{'plotting results':<35}"):
+
+            ax = fig.add_subplot(gs[indices[0], indices[1]])
+            ax.set_xlabel(labels[0], fontsize=16)
+            ax.set_ylabel(labels[1], fontsize=16)
+
+            if quantum_numbers is not None:
+                for i in range(len(values[1][0])):
+                    color_category = color_map.get(int(quantum_numbers[0][i][0]))
+                    set_color = get_colormap_color(color_category, i+1, len(values[1][0]))
+
+                    if style == 'plot':
+                        ax.plot(values[0], values[1][:, i], color=set_color)
+                    elif style == 'contour':
+                        ax.contourf(values[0], values[1][:, i], values[2], 100)
+            else:
+                if style == 'plot':
+                    ax.plot(values[0], values[1])
+                elif style == 'contour':
+                    ax.contourf(values[0], values[1], values[2], 100)
+
+        plt.tight_layout()
+        plt.show()
+
+    elif plot_mode == "3D":
+        # For 3D plotting, a single 3D plot
+        fig = plt.figure(figsize=(10, 8))
+        ax = fig.add_subplot(111, projection='3d')
+
+        for i, (labels, values, indices, style) in enumerate(results):
+            x = values[0]  # times
+            y = np.full_like(values[1], i)  # Trial index as y-axis
+            z = values[1]  # expectation values
+
+            # Plot each trial in the 3D plot
+            for trial in range(z.shape[1]):
+                ax.plot(x, y[:, trial], z[:, trial])
+
+        ax.set_xlabel("Time", fontsize=12)
+        ax.set_zlabel("⟨J_z⟩", fontsize=12)
+        plt.show()
 
 def find_quantum_numbers(states, precision=10, sort=None, secondary_sort=None, sort_dict={}):
     """ Find quantum numbers for each eigenstate at λ=0, assuming H has been constructed.
@@ -995,344 +1024,113 @@ def quantum_numbers_sorting(states, sort=None, secondary_sort=None, sort_dict={}
 
 ########################################################################################################################################################
 # WIP
-def von_Neumann_entropy(ρ, base=2):
-    """ Calculate the von Neumann entropy via S(ρ) = -Tr(ρ log ρ).
+    global H, J_m
     
-        Parameters
-        ----------
-        ρ : 2D array; density matrix
-        base : int or float; base of the logarithm (default is 2)
-        
-        Returns
-        -------
-        entropy : float; von Neumann entropy """
+    # Set time parameters
+    t_max     = 30
+    dt        = 0.01
+    timesteps = int(t_max / dt)
+    times     = np.linspace(0, t_max, timesteps)
     
-    eigvals = np.linalg.eigvalsh(ρ)
-    eigvals = eigvals[eigvals > 0]  # avoids issues with log(0) by only considering non-zero eigenvalues
+    # Set Lindblad operators
+    L = [J_m, J_z]
     
-    if base == 2:
-        log_eigvals = np.log2(eigvals)
-    elif base == np.e:
-        log_eigvals = np.log(eigvals)
-    else:
-        log_eigvals = np.log(eigvals) / np.log(base)  # For custom base logarithms
-    
-    return -np.sum(eigvals * log_eigvals)
-
-def uncategorized_fn_1_new(states, variable_set):
-    ## Prepare entropy arrays
-    entropy_tot    = np.zeros(np.shape(variable_set))
-    entropy_cavity = np.zeros(np.shape(variable_set))
-    entropy_spin   = np.zeros(np.shape(variable_set))
-    
-    print(states[1])
-    print()
-    
-    ## Calculate entropy for each ground state
-    for i, psi_gnd in enumerate(states[1]):
-    
-        # Compute the density matrix for the ground state
-        rho_gnd = np.outer(psi_gnd, psi_gnd.conj())
-        
-        # Partial trace to get reduced density matrices
-        rho_gnd_cavity = partial_trace(rho_gnd, n_max_default, m_J(N_default), trace_out='B')
-        rho_gnd_spin   = partial_trace(rho_gnd, n_max_default, m_J(N_default), trace_out='A')
-        
-        #print(rho_gnd_cavity)
-        #print()
-        #print(rho_gnd_spin)
-        #print()
-        
-        # Calculate the von Neumann entropy for the total system and subsystems
-        entropy_tot[i]    = von_Neumann_entropy(rho_gnd, 2)
-        entropy_cavity[i] = von_Neumann_entropy(rho_gnd_spin, 2)
-        entropy_spin[i]   = von_Neumann_entropy(rho_gnd_cavity, 2) 
-        
-        #print(entropy_cavity[i])
-        #print()
-        #print(entropy_spin[i])
-        #print()   
-        
-    fig, axes = plt.subplots(1, 1, figsize=(12,6))
-    axes.plot(variable_set, entropy_tot, 'k', variable_set, entropy_cavity, 'b', variable_set, entropy_spin, 'r--')
-
-    axes.set_ylabel("Entropy of subsystems", fontsize=16)
-    axes.set_xlabel("interaction strength", fontsize=16)
-
-    plt.tight_layout()
-    plt.show()
-
-def uncategorized_fn_1():
-    ##
-    psi_gnd_sublist = ground_state_list[1][::4]
-    xvec            = np.linspace(-7,7,200)
-
-    ##
-    entropy_tot    = np.zeros(np.shape(λ_vals))
-    entropy_cavity = np.zeros(np.shape(λ_vals))
-    entropy_spin   = np.zeros(np.shape(λ_vals))
-    for idx, psi_gnd in enumerate(ground_state_list[1]):
-        rho_gnd_cavity = qt.ptrace(psi_gnd, 0)
-        rho_gnd_spin   = qt.ptrace(psi_gnd, 1)
-        entropy_tot[idx]    = qt.entropy_vn(psi_gnd, 2)
-        entropy_cavity[idx] = qt.entropy_vn(rho_gnd_cavity, 2)
-        entropy_spin[idx]   = qt.entropy_vn(rho_gnd_spin, 2)
-    
-    fig, axes = plt.subplots(1, 1, figsize=(12,6))
-    axes.plot(g_vec, entropy_tot, 'k', g_vec, entropy_cavity, 'b', g_vec, entropy_spin, 'r--')
-
-    axes.set_ylim(0, 1.5)
-    axes.set_ylabel("Entropy of subsystems", fontsize=16)
-    axes.set_xlabel("interaction strength", fontsize=16)
-
-    fig.tight_layout()
-
-def calulcate_entropy(n_max, N, λ_vals):
-    J = N/2.0
-    m_J = 2*J + 1
-
-    # setup the hamiltonian for the requested hilbert space sizes
-    a  = qt.tensor(qt.destroy(n_max), qt.qeye(m_J))
-    Jp = qt.tensor(qt.qeye(n_max), qt.jmat(J, '+'))
-    Jm = qt.tensor(qt.qeye(n_max), qt.jmat(J, '-'))
-    Jz = qt.tensor(qt.qeye(n_max), qt.jmat(J, 'z'))
-
-    H0 = ω * a.dag() * a + ω0 * Jz
-    H1 = 1.0 / np.sqrt(N) * (a + a.dag()) * (Jp + Jm)
-
-    # Ground state and steady state for the Hamiltonian: H = H0 + g * H1
-    psi_gnd_list = [(H0 + g * H1).groundstate()[1]  for g in λ_vals]
-    
-    entropy_cavity = np.zeros(np.shape(λ_vals))
-    entropy_spin   = np.zeros(np.shape(λ_vals))
-
-    for idx, psi_gnd in enumerate(psi_gnd_list):
-
-        rho_gnd_cavity = qt.ptrace(psi_gnd, 0)
-        rho_gnd_spin   = qt.ptrace(psi_gnd, 1)
-    
-        entropy_cavity[idx] = qt.entropy_vn(rho_gnd_cavity, 2)
-        entropy_spin[idx]   = qt.entropy_vn(rho_gnd_spin, 2)
-        
-    return entropy_cavity, entropy_spin
-
-def uncategorized_fn_2():
-    ##
-    # average number thermal photons in the bath coupling to the resonator
-    n_th = 0.25
-
-    c_ops = [np.sqrt(κ * (n_th + 1)) * a, np.sqrt(κ * n_th) * a.dag()]
-    #c_ops = [sqrt(κ) * a, sqrt(gamma) * Jm]
-    g_vec = np.linspace(0.01, 1.0, 20)
-
-    # Ground state for the Hamiltonian: H = H0 + g * H1
-    rho_ss_list = [qt.steadystate(H_field + H_atom + g * H_int, c_ops) for g in g_vec]
-    # calculate the expectation value of the number of photons in the cavity
-    n_ss_vec = qt.expect(a.dag() * a, rho_ss_list)
-
-def plot_entropy_entanglement():
-    λ_vals = np.linspace(0.2, 0.8, 60)
-    N_vec = [4, 8, 12, 16, 24, 32]
-    MM = 25
-
-    fig, axes = plt.subplots(1, 1, figsize=(12,6))
-
-    for NN in N_vec:
-        
-        entropy_cavity, entropy_spin = calulcate_entropy(MM, NN, λ_vals)
-        
-        axes.plot(λ_vals, entropy_cavity, 'b', label="N = %d" % NN)
-        axes.plot(λ_vals, entropy_spin, 'r--')
-
-    axes.set_ylim(0, 1.75)
-    axes.set_ylabel("Entropy of subsystems", fontsize=16)
-    axes.set_xlabel("interaction strength", fontsize=16)
-    axes.legend()
-
-    fig.tight_layout()
-    plt.show()
-
-def plot_entropy_subsystems():
-    entropy_tot    = np.zeros(np.shape(λ_vals))
-    entropy_cavity = np.zeros(np.shape(λ_vals))
-    entropy_spin   = np.zeros(np.shape(λ_vals))
-
-    for idx, rho_ss in enumerate(rho_ss_list):
-
-        rho_gnd_cavity = qt.ptrace(rho_ss, 0)
-        rho_gnd_spin   = qt.ptrace(rho_ss, 1)
-        
-        entropy_tot[idx]    = qt.entropy_vn(rho_ss, 2)
-        entropy_cavity[idx] = qt.entropy_vn(rho_gnd_cavity, 2)
-        entropy_spin[idx]   = qt.entropy_vn(rho_gnd_spin, 2)
-         
-
-    fig, axes = plt.subplots(1, 1, figsize=(12,6))
-
-    axes.plot(λ_vals, entropy_tot, 'k', label="total")
-    axes.plot(λ_vals, entropy_cavity, 'b', label="cavity")
-    axes.plot(λ_vals, entropy_spin, 'r--', label="spin")
-
-    axes.set_ylabel("Entropy of subsystems", fontsize=16)
-    axes.set_xlabel("interaction strength", fontsize=16)
-    axes.legend(loc=0)
-    fig.tight_layout()
-    plt.show()
-
-def plot_Wigner_distribution_1(variable_set, states):
-    """ Uses QuTiP to plot Wigner distribution. """
-    
-    # Select some states to plot
-    ground_state_sublist = states[1][::4]
-
-    # Generate phase space intervals
-    xvec = np.linspace(-7, 7, 200) # np.linspace(np.min(x_eigenvalues), np.max(x_eigenvalues), 100)
-    pvec = xvec # np.linspace(np.min(p_eigenvalues), np.max(p_eigenvalues), 100)
-    
-    # Calculate Wigner distributions
+    # Initialize data container for plotting
     plot_list = []
-    for i in tqdm(range(len(ground_state_sublist)), desc=f"{'creating Wigner distributions':<35}"):
     
-        # Calculate density matrix
-        ρ = np.outer(ground_state_sublist[i], ground_state_sublist[i].conj())
-        
-        # Trace out the spin space
-        ρ = partial_trace(ρ, n_max_default, int(2*J(N_default)+1), trace_out='B')
-        
-        # Calculate using QuTiP
-        W = qt.wigner(qt.Qobj(ρ), xvec, pvec)
-        
-        # Return for plotting
-        plot_list.append([(f"$x$", f"$p$"), (xvec, pvec, W), (0, i), ('contour')])
-
-    plot_results(plot_list)
-
-def plot_Wigner_distribution_2(rho, xvec, pvec):
-    """
-    Calculate the Wigner function for a quantum state in the Fock basis.
-
-    Parameters:
-    rho : ndarray
-        Density matrix in the Fock basis.
-    xvec, pvec : ndarray
-        Arrays representing the phase space grid.
-
-    Returns:
-    W : ndarray
-        2D array of the Wigner function values over the phase space grid.
-    """
-    N = rho.shape[0]  # Dimension of the Hilbert space
-    W = np.zeros((len(xvec), len(pvec)), dtype=np.complex128)
+    # Sort through each λ
+    for i in range(len(variable_set)):
     
-    # Create a grid of alpha = (x + ip) / sqrt(2)
-    for i, x in tqdm(enumerate(xvec), desc=f"{'calculating Wigner distribution':<35}"):
-        for j, p in enumerate(pvec):
-            alpha = (x + 1j * p) / np.sqrt(2)
+        # Initialize data container for plotting
+        expectation_values = []
+    
+        # Generate density matrices
+        ρ_array = []
+        for j in range(states[1][i].shape[1]):
+            ρ_array.append(np.outer(states[1][i][:,j], states[1][i][:,j].conj()))
+        ρ_array = np.array(ρ_array)
+
+        # Sort through density matrices
+        for j in range(len(ρ_array)):
+            ρ = ρ_array[j]
+            expectation_values.append([])
+        
+            # Sort through each time step
+            for t in tqdm(range(len(times)), desc=f"{'calculating Lindbladian':<35}"):
             
-            # Displacement operator in the Fock basis
-            D = np.zeros((N, N), dtype=np.complex128)
-            for m in range(N):
-                for n in range(N):
-                    if m >= n:
-                        D[m, n] = np.exp(-0.5 * np.abs(alpha)**2) * (alpha ** (m-n)) / np.sqrt(factorial(m) * factorial(n))
-                    else:
-                        D[m, n] = 0
-            
-            # Calculate Wigner function at point (x, p)
-            W[i, j] = np.trace(np.dot(rho, D)) * np.exp(-np.abs(alpha)**2)
-    
-    W = np.real(W)  # Wigner function should be real
-    W /= np.pi  # Normalization
+                # Store observable for plotting
+                expectation_values[j].append(np.real(np.trace(J_z @ ρ)))
+                
+                # Construct the Lindbladian and evolve the density matrix
+                dρ = -1j * (H(variable_set[i]) @ ρ - ρ @ H(variable_set[i]))
+                for M in L:
+                    anticommutator = (M.conj().T @ M) @ ρ + ρ @ (M.conj().T @ M)
+                    dρ += M @ (ρ @ M.conj().T) - (1/2) * anticommutator                
+                ρ = ρ + dt * dρ
 
-    return W
+        expectation_values = np.array(expectation_values).T
+        plot_list.append([(f"$t$", f"$⟨J_z⟩,   λ={round(variable_set[i],2)}$"), (times, expectation_values), (0, i), ('plot')])
 
-def Wigner_function_optimized(rho, xvec, pvec):
-    Nx = len(xvec)
-    W = np.zeros((Nx, Nx), dtype=np.complex128)
+    # Plot the results
+    plot_results(plot_list, quantum_numbers=quantum_numbers)
 
-    # Create grids for phase space
-    X, P = np.meshgrid(xvec, pvec, indexing='ij')
-    alpha_grid = (X + 1j * P) / np.sqrt(2)
+def Lindblad(variable_set, states, quantum_numbers, plot_mode="2D"):
+    global H, J_m
 
-    # Calculate Wigner function using FFT
-    for i in tqdm(range(Nx), desc='calculating Wigner distribution'):
-        for j in range(Nx):
-            alpha = alpha_grid[i, j]
-            D = np.zeros(rho.shape, dtype=np.complex128)
-            for m in range(rho.shape[0]):
-                for n in range(rho.shape[1]):
-                    if m >= n:
-                        D[m, n] = np.exp(-0.5 * np.abs(alpha)**2) * (alpha ** (m-n)) / np.sqrt(factorial(m) * factorial(n))
-            W[i, j] = np.trace(np.dot(rho, D)) * np.exp(-np.abs(alpha)**2)
+    # Set time parameters
+    t_max     = 5   # set time interval
+    t_shift   = 0    # set start time
+    dt        = 0.001  # set time steps
+    times     = np.linspace(t_shift, t_max+t_shift, int((t_max-t_shift) / dt))
 
-    W = np.real(W) / np.pi
-    return W
+    # Set Lindblad operators
+    L = [J_m, J_z] # set as [np.eye(J_z.shape[0])] to retain Schrodinger equation
 
-def time_evolution(state):
-    variable_set  = np.linspace(0, 10, 11)
-    time_operator = lambda t: expm(-1j*H(0)*t/ℏ)
-    E_vals = [expectation(H(0), time_operator(t)@state) for t in variable_set]
-    
-    plot_results([[(f"$t$", f"$E$"), (variable_set, E_vals), (0, 0), ('plot')]])
+    # Initialize data container for plotting
+    plot_list = []
 
-def tensor_product_to_vectors(tensor, dim_1, dim_2):
-    # Reconstruct the first vector (space 1)
-    vector_1 = np.zeros(dim_1)
-    for i in range(dim_1):
-        vector_1[i] = tensor_product_vector[i * dim_2] / tensor_product_vector[0]  # Normalize by first element
+    # Sort through each λ
+    for i in range(len(variable_set)):
 
-    # Reconstruct the second vector (space 2)
-    vector_2 = np.zeros(dim_2)
-    for j in range(dim_2):
-        vector_2[j] = tensor_product_vector[j] / vector_1[0]  # Use the first vector to reconstruct the second
+        # Initialize data container for plotting
+        expectation_values = []
 
-    return vector_1, vector_2
+        # Generate density matrices
+        ρ_array = []
+        for j in range(states[1][i].shape[1]):
+            ρ_array.append(np.outer(states[1][i][:,j], states[1][i][:,j].conj()))
+        ρ_array = np.array(ρ_array)
 
-def create_x_p_operators():
-    """ Possibly useful for Wigner distribution plots. """
-    
-    global x, p
-    
-    try:
-        x = np.sqrt(ℏ/(2*m*ω)) * (a_dag + a)
-        p = 1j * np.sqrt(ℏ*m*ω/2) * (a_dag - a)
-    except:
-        create_a_operators(n_max_default)
-        x = np.sqrt(ℏ/(2*m*ω)) * (a_dag + a)
-        p = 1j * np.sqrt(ℏ*m*ω/2) * (a_dag - a)
+        # Sort through density matrices
+        for j in range(len(ρ_array)):
+            ρ = ρ_array[j]
+            expectation_values.append([])
+
+            # Sort through each time step
+            for t in tqdm(range(len(times)), desc=f"{'calculating Lindbladian':<35}"):
+
+                # Store observable for plotting
+                expectation_values[j].append(np.real(np.trace(J_z @ ρ)))
+
+                # Construct the Lindbladian and evolve the density matrix
+                dρ = -1j * (H(variable_set[i]) @ ρ - ρ @ H(variable_set[i]))
+                for M in L:
+                    anticommutator = (M.conj().T @ M) @ ρ + ρ @ (M.conj().T @ M)
+                    dρ += M @ (ρ @ M.conj().T) - (1/2) * anticommutator
+                ρ = ρ + dt * dρ
+
+        expectation_values = np.array(expectation_values).T
+        plot_list.append([(f"$t$", f"$⟨J_z⟩,   λ={round(variable_set[i],2)}$"), 
+                          (times, expectation_values), 
+                          (0, i), 
+                          ('plot')])
+
+    plot_results(plot_list, quantum_numbers=quantum_numbers, plot_mode=plot_mode)
 
 ########################################################################################################################################################
 # Main
 def main():
-    """ Ideally only used to develop algorithms. """
-    
-    examples()
-    #SEOP_Dicke_model()
-    #two_spin_Dicke_model()
-    
-    # Initialize model
-    #init_Dicke_model(n_max_default, N_default)
-
-    # Generate all eigenstates and eigenvalues
-    #variable_set = np.linspace(0, 1.0, 2) # np.linspace(0, 3*λ_critical, 101) 
-    #states = calculate_states(variable_set, ground_state=False)
-
-    # Sort eigenstates and eigenvalues
-    #states, quantum_numbers = quantum_numbers_sorting(states, sort='P', secondary_sort='E')
-
-    # Do some optional stuff
-    ## Verify sorting (optional)
-    #print(find_quantum_numbers(states, precision=1, sort=None, secondary_sort=None)[0])
-    #print(find_quantum_numbers(states, precision=1, sort=None, secondary_sort=None)[-1])
-    ## Select specific eigenstates; indexed from least to greatest energy
-    #selected_states = [0] # ex. range(15) or [0, len(states[0])/2]
-    #states          = [states[0][:,selected_states], states[1][:,:,selected_states]]
-    #quantum_numbers = quantum_numbers[:,selected_states]
-
-    # Make a calculation
-    #plot_spectrum(variable_set, states, quantum_numbers=None)
-    #plot_n_and_Jz(variable_set, states, quantum_numbers=None)
-    #uncategorized_fn_1_new(states, variable_set)
+    examples(5)
 
 if __name__ == "__main__":
     main()
