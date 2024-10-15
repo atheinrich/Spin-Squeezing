@@ -1,9 +1,5 @@
 ########################################################################################################################################################
-#
 # Dicke model
-# Alex Heinrich
-# Oct. 2024
-#
 ########################################################################################################################################################
 
 ########################################################################################################################################################
@@ -127,23 +123,20 @@
 ## Utility
 import matplotlib.pyplot as plt                  # plotting
 from matplotlib.gridspec import GridSpec         # plotting
-from tqdm import tqdm                            # loading bar
-from mpl_toolkits.mplot3d import Axes3D          # WIP
+from mpl_toolkits.mplot3d import Axes3D          # plotting
+from tqdm import tqdm                            # loading bars
 
 ## Computation
 import numpy as np                               # tensor algebra
-from scipy.special import factorial              # factorials
-from scipy.optimize import linear_sum_assignment # eigenvalue reordering
+from scipy.linalg import expm                    # unitary transformations
 
 ## WIP
 import qutip as qt                               # Wigner distribution (deprecated or nonfunctional)
-from scipy.linalg import expm                    # unitary transformations (WIP)
-from itertools import permutations
 
 ########################################################################################################################################################
 # Parameters
 ## Set these here
-ω             = 0.01 # field frequency; single-mode field, like first-order waves in a box (10**16 1/s)
+ω             = 0.01 # field frequency;  single-mode field, like first-order waves in a box (10**16 1/s)
 ω0            = 10   # atomic frequency; single frequency for the transition |n⟩ → |n ± 1⟩ for a harmonic oscillator (10**6 1/s)
 ℏ             = 1    # Planck's constant (1.054571817 * 10**(-34) J∙s)
 m             = 1    # mass
@@ -323,8 +316,61 @@ def Dicke_Hamiltonian(N):
 
     H_field = ℏ * ω  * (a_dag @ a)         # counts the energy of each photon; (1/2)*np.eye(a.shape[0])
     H_atom  = ℏ * ω0 * J_z                 # counts the energy of each spin
-    H_int   = ℏ / np.sqrt(N) * (a + a_dag) @ J_x   # quantifies the interaction between the atoms and the field
+    H_int   = 2 * ℏ / np.sqrt(N) * (a + a_dag) @ J_x   # quantifies the interaction between the atoms and the field
     H       = lambda λ: H_field + H_atom + λ*H_int # sums the total energy and sets the interaction strength
+
+def Lindbladian(variable_set, states, quantum_numbers, plot_mode="2D"):
+    global H, J_m
+
+    # Set time parameters
+    t_max     = 5   # set time interval
+    t_shift   = 0    # set start time
+    dt        = 0.1  # set time steps
+    times     = np.linspace(t_shift, t_max+t_shift, int((t_max-t_shift) / dt))
+
+    # Set Lindbladian operators
+    L = [J_m, J_z] # set as [np.eye(J_z.shape[0])] to retain Schrodinger equation
+
+    # Initialize data container for plotting
+    plot_list = []
+
+    # Sort through each λ
+    for i in range(len(variable_set)):
+
+        # Initialize data container for plotting
+        expectation_values = []
+
+        # Generate density matrices
+        ρ_array = []
+        for j in range(states[1][i].shape[1]):
+            ρ_array.append(np.outer(states[1][i][:,j], states[1][i][:,j].conj()))
+        ρ_array = np.array(ρ_array)
+
+        # Sort through density matrices
+        for j in range(len(ρ_array)):
+            ρ = ρ_array[j]
+            expectation_values.append([])
+
+            # Sort through each time step
+            for t in tqdm(range(len(times)), desc=f"{'calculating Lindbladian':<35}"):
+
+                # Store observable for plotting
+                expectation_values[j].append(np.real(np.trace(J_z @ ρ)))
+
+                # Construct the Lindbladian and evolve the density matrix
+                dρ = -1j * (H(variable_set[i]) @ ρ - ρ @ H(variable_set[i]))
+                for M in L:
+                    anticommutator = (M.conj().T @ M) @ ρ + ρ @ (M.conj().T @ M)
+                    dρ += M @ (ρ @ M.conj().T) - (1/2) * anticommutator
+                ρ = ρ + dt * dρ
+                
+        expectation_values = np.array(expectation_values).T
+        plot_list.append([(f"$t$", f"$⟨J_z⟩,   λ={round(variable_set[i],2)}$"), 
+                          (times, expectation_values), 
+                          (0, i), 
+                          ('plot')])
+
+    plot_results(plot_list, quantum_numbers=quantum_numbers, plot_mode=plot_mode)
 
 ########################################################################################################################################################
 # Operations
@@ -522,7 +568,7 @@ def SEOP_Dicke_model():
     H_I     = ℏ * ω0 * I_z
     H_S     = ℏ * ω0 * S_z
     H_spin  = ℏ * ω0 * I_z @ S_z
-    H_int   = ℏ / np.sqrt(N) * (a + a_dag) @ S_x
+    H_int   = 2 * ℏ / np.sqrt(N) * (a + a_dag) @ S_x
     H       = lambda λ: H_field + H_I + H_S + H_spin + λ*H_int
 
     # Generate all eigenstates and eigenvalues
@@ -611,7 +657,7 @@ def two_spin_Dicke_model():
     # Create Hamiltonian
     H_field = ℏ * ω  * (a_dag @ a)
     H_spin  = ℏ * ω0 * (S_z + I_z)
-    H_int   = ℏ / np.sqrt(N) * (a + a_dag) @ (S_x - I_x)
+    H_int   = 2 * ℏ / np.sqrt(N) * (a + a_dag) @ (S_x - I_x)
     H       = lambda λ: H_field + H_spin + λ*H_int
 
     # Generate all eigenstates and eigenvalues
@@ -777,10 +823,10 @@ def examples(specific_example=0):
         λ_critical = (ω * ω0)**(1/2)/2
         
         # Initialize model
-        init_Dicke_model(n_max=24, N=4)
+        init_Dicke_model(n_max=2, N=1)
 
         # Generate all eigenstates and eigenvalues
-        variable_set = np.linspace(0.01, 10*λ_critical, 2)
+        variable_set = np.linspace(0.01, 10*λ_critical, 11)
         states       = calculate_states(variable_set)
 
         # Sort eigenstates and eigenvalues
@@ -793,7 +839,8 @@ def examples(specific_example=0):
 
         # Make a calculation
         #plot_n_and_Jz(variable_set, states, quantum_numbers)
-        Lindblad(variable_set, states, quantum_numbers, plot_mode="2D")
+        #Lindbladian(variable_set, states, quantum_numbers, plot_mode="2D")
+        Chebyshift(variable_set, states, quantum_numbers=quantum_numbers, plot_mode="3D")
     
     else:
         print('There are no examples with this value.')
@@ -1024,100 +1071,75 @@ def quantum_numbers_sorting(states, sort=None, secondary_sort=None, sort_dict={}
 
 ########################################################################################################################################################
 # WIP
-    global H, J_m
+def Chebyshift(variable_set, states, quantum_numbers=None, plot_mode="2D"):
+    from scipy.special import jv  # Bessel function of the first kind
+    from scipy.sparse import identity, csr_matrix
+    from scipy.sparse.linalg import eigsh, LinearOperator
     
     # Set time parameters
-    t_max     = 30
-    dt        = 0.01
-    timesteps = int(t_max / dt)
-    times     = np.linspace(0, t_max, timesteps)
-    
-    # Set Lindblad operators
-    L = [J_m, J_z]
-    
-    # Initialize data container for plotting
-    plot_list = []
-    
-    # Sort through each λ
-    for i in range(len(variable_set)):
-    
-        # Initialize data container for plotting
-        expectation_values = []
-    
-        # Generate density matrices
-        ρ_array = []
-        for j in range(states[1][i].shape[1]):
-            ρ_array.append(np.outer(states[1][i][:,j], states[1][i][:,j].conj()))
-        ρ_array = np.array(ρ_array)
+    t_max      = 5   # set time interval
+    t_shift    = 0    # set start time
+    dt         = 0.1  # set time steps
+    times   = np.linspace(t_shift, t_max+t_shift, int((t_max-t_shift) / dt))
 
-        # Sort through density matrices
-        for j in range(len(ρ_array)):
-            ρ = ρ_array[j]
-            expectation_values.append([])
+    def chebyshev_time_evolution(H, psi0, t, num_terms=100):
+        # Estimate the max and min eigenvalues of H
+        E_min, E_max = eigsh(H, k=2, which='BE', return_eigenvectors=False)
         
-            # Sort through each time step
-            for t in tqdm(range(len(times)), desc=f"{'calculating Lindbladian':<35}"):
+        psi_cache = np.zeros_like(psi0, dtype=np.complex128)
+        psi0 = psi_cache+psi0
+
+        # Scale the Hamiltonian
+        H_scaled = (2 * H - (E_max + E_min) * csr_matrix(identity(H.shape[0]))) / (E_max - E_min)
+        
+        # Initial Chebyshev polynomials
+        T0 = psi0
+        T1 = H_scaled @ psi0
+        T1 = T1
+        
+        # Time evolution result (initialized with the first term)
+        psi_t = jv(0, t * (E_max - E_min) / 2) * T0
+        
+        # Iteratively compute higher-order terms
+        for n in range(1, num_terms):
+        
+            Tn = np.zeros(T0.shape[0], dtype=np.complex128).reshape((4, 1))
+            Tn += 2 * (H_scaled @ T1) - T0
+
+            # Add the contribution of the nth term
+            psi_t += (2 * (-1j)**n * jv(n, t * (E_max - E_min) / 2)) * Tn
             
-                # Store observable for plotting
-                expectation_values[j].append(np.real(np.trace(J_z @ ρ)))
-                
-                # Construct the Lindbladian and evolve the density matrix
-                dρ = -1j * (H(variable_set[i]) @ ρ - ρ @ H(variable_set[i]))
-                for M in L:
-                    anticommutator = (M.conj().T @ M) @ ρ + ρ @ (M.conj().T @ M)
-                    dρ += M @ (ρ @ M.conj().T) - (1/2) * anticommutator                
-                ρ = ρ + dt * dρ
+            # Update for the next iteration
+            T0, T1 = T1, Tn
+        return T1
 
-        expectation_values = np.array(expectation_values).T
-        plot_list.append([(f"$t$", f"$⟨J_z⟩,   λ={round(variable_set[i],2)}$"), (times, expectation_values), (0, i), ('plot')])
+    # Number of Chebyshev terms to use (higher number -> better accuracy)
+    num_terms = 10
 
-    # Plot the results
-    plot_results(plot_list, quantum_numbers=quantum_numbers)
-
-def Lindblad(variable_set, states, quantum_numbers, plot_mode="2D"):
-    global H, J_m
-
-    # Set time parameters
-    t_max     = 5   # set time interval
-    t_shift   = 0    # set start time
-    dt        = 0.001  # set time steps
-    times     = np.linspace(t_shift, t_max+t_shift, int((t_max-t_shift) / dt))
-
-    # Set Lindblad operators
-    L = [J_m, J_z] # set as [np.eye(J_z.shape[0])] to retain Schrodinger equation
-
-    # Initialize data container for plotting
     plot_list = []
 
-    # Sort through each λ
-    for i in range(len(variable_set)):
-
-        # Initialize data container for plotting
+    # Cycle through trials
+    for i in tqdm(range(len(states[1])), desc='...'):
         expectation_values = []
-
-        # Generate density matrices
-        ρ_array = []
+        
+        # Cycle through states
         for j in range(states[1][i].shape[1]):
-            ρ_array.append(np.outer(states[1][i][:,j], states[1][i][:,j].conj()))
-        ρ_array = np.array(ρ_array)
-
-        # Sort through density matrices
-        for j in range(len(ρ_array)):
-            ρ = ρ_array[j]
             expectation_values.append([])
 
-            # Sort through each time step
-            for t in tqdm(range(len(times)), desc=f"{'calculating Lindbladian':<35}"):
-
-                # Store observable for plotting
-                expectation_values[j].append(np.real(np.trace(J_z @ ρ)))
-
-                # Construct the Lindbladian and evolve the density matrix
-                dρ = -1j * (H(variable_set[i]) @ ρ - ρ @ H(variable_set[i]))
-                for M in L:
-                    anticommutator = (M.conj().T @ M) @ ρ + ρ @ (M.conj().T @ M)
-                    dρ += M @ (ρ @ M.conj().T) - (1/2) * anticommutator
-                ρ = ρ + dt * dρ
+            # Evolve state
+            measures = []
+            state = states[1][i][:,j].reshape((4, 1))
+            
+            for t in times:
+            
+                # Compute the time-evolved state at time t
+                psi_t = chebyshev_time_evolution(H(variable_set[i]), state, t, num_terms)
+                
+                # Calculate a property of the evolved state (e.g., probability |psi_t|^2)
+                measure = expectation(J_z, psi_t.T, single_state=True)[0][0]
+                
+                # Store the total measure at this time step (or any other property of interest)
+                expectation_values[j].append(np.real(measure))
 
         expectation_values = np.array(expectation_values).T
         plot_list.append([(f"$t$", f"$⟨J_z⟩,   λ={round(variable_set[i],2)}$"), 
@@ -1126,7 +1148,7 @@ def Lindblad(variable_set, states, quantum_numbers, plot_mode="2D"):
                           ('plot')])
 
     plot_results(plot_list, quantum_numbers=quantum_numbers, plot_mode=plot_mode)
-
+    
 ########################################################################################################################################################
 # Main
 def main():
