@@ -15,3 +15,12 @@ Critical dependencies include Python, matplotlib, and numpy. Convenient dependen
 
 # Installation
 Clone the repository using git or simply copy the desired code directly. The only atypical package I use is tqdm, so install it or adjust the code to remove its dependence.
+
+# Dicke model
+This code is based on the typical Dicke model.
+
+$$
+H = \omega a^\dagger a + \omega_0 J_z + \frac{g}{\sqrt{N}} \left( a^\dagger + a \right) \left( J_+ + J_- \right)
+$$
+
+This might not be the actual Hamiltonian used in the code, so check documentation. The key idea is to illustrate the quantum phase transition for the "normal" phase to the "superradiant" phase, which typically depends on the frequency of the field mode and the frequency of the atomic resonance.
