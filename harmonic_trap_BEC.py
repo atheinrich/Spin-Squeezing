@@ -1,15 +1,24 @@
 ##################################################################
-#
-# Dicke model
+# Harmonic trap BEC as a Dicke model
 # Huang & Hu, equation (4)
-#
 ##################################################################
 
+##################################################################
+# Summary
+""" Overview
+    I wrote this code quickly and promptly neglected it. """
+
+##################################################################
+# Imports
 import numpy as np
 import matplotlib.pyplot as plt
 
+##################################################################
+# Parameters
 ℏ = 1
 
+##################################################################
+# Classes
 class DickeModel:
     def __init__(self, N, ω, Ω, δ, λ, m):
         self.N = N           # Number of qubits
@@ -56,11 +65,12 @@ class DickeModel:
         plt.grid(True)
         plt.show()
 
-# Example usage:
+##################################################################
+# Main
 if __name__ == "__main__":
-    N = 2           # Number of qubits
-    ω = 1.0     # Frequency of the bosonic mode
-    Ω = 0.1         # Coupling strength
+    N = 2         # Number of qubits
+    ω = 1         # Frequency of the bosonic mode
+    Ω = 0         # Coupling strength
     δ = 0
     m = 1
     λ = 1
