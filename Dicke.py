@@ -721,6 +721,7 @@ def examples(specific_example=0):
         states, quantum_numbers = quantum_numbers_sorting(states, sort='P', secondary_sort='E')
 
         # Make a calculation
+        print(f"")
         plot_spectrum(variable_set, states, quantum_numbers)
     
     # Example 1: cavity occupation
@@ -728,7 +729,8 @@ def examples(specific_example=0):
     
         # Set frequencies
         ω, ω0 = 0.1, 10
-        
+        λ_critical = (ω * ω0)**(1/2)/2
+
         # Initialize model
         init_Dicke_model(n_max=24, N=2)
 
@@ -802,7 +804,7 @@ def examples(specific_example=0):
         create_parity_operator()           # creates parity operator for sorting
         H_field = ℏ * ω  * (a_dag @ a + a @ a)
         H_atom  = ℏ * ω0 * J_z
-        H_int   = ℏ / np.sqrt(N) * (a + a_dag) @ J_x
+        H_int   = 2 * ℏ / np.sqrt(N) * (a + a_dag) @ J_x
         H       = lambda λ: H_field + H_atom + λ*H_int
 
         # Generate all eigenstates and eigenvalues
@@ -810,12 +812,12 @@ def examples(specific_example=0):
         states       = calculate_states(variable_set)
 
         # Sort eigenstates and eigenvalues
-        states, quantum_numbers = quantum_numbers_sorting(states, sort='n', secondary_sort='J_z')
+        states, quantum_numbers = quantum_numbers_sorting(states, sort='P', secondary_sort='E')
 
         # Make a calculation
         plot_spectrum(variable_set, states, quantum_numbers)
     
-    # Development
+    # Development: Chebyshev evolution
     elif specific_example == 5:
     
         # Set frequencies
@@ -823,10 +825,10 @@ def examples(specific_example=0):
         λ_critical = (ω * ω0)**(1/2)/2
         
         # Initialize model
-        init_Dicke_model(n_max=2, N=1)
+        init_Dicke_model(n_max=48, N=4)
 
         # Generate all eigenstates and eigenvalues
-        variable_set = np.linspace(0.01, 10*λ_critical, 11)
+        variable_set = np.linspace(0, 2*λ_critical, 11)
         states       = calculate_states(variable_set)
 
         # Sort eigenstates and eigenvalues
@@ -841,7 +843,64 @@ def examples(specific_example=0):
         #plot_n_and_Jz(variable_set, states, quantum_numbers)
         #Lindbladian(variable_set, states, quantum_numbers, plot_mode="2D")
         Chebyshift(variable_set, states, quantum_numbers=quantum_numbers, plot_mode="3D")
+
+    # Development: Lindbladian evolution
+    elif specific_example == 6:
     
+        # Set frequencies
+        ω, ω0 = 0.1, 10
+        λ_critical = (ω * ω0)**(1/2)/2
+        
+        # Initialize model
+        init_Dicke_model(n_max=48, N=4)
+
+        # Generate all eigenstates and eigenvalues
+        variable_set = np.linspace(0, 2*λ_critical, 11)
+        states       = calculate_states(variable_set)
+
+        # Sort eigenstates and eigenvalues
+        states, quantum_numbers = quantum_numbers_sorting(states, sort='P', secondary_sort='E')
+
+        # Select specific eigenstates
+        selected_states = [0, int(len(states[0][0])/2)] # [0, 1, int(len(states[0][0])/2), int(len(states[0][0])/2)+1]
+        states          = [states[0][:,selected_states], states[1][:,:,selected_states]]
+        quantum_numbers = quantum_numbers[:,selected_states]
+
+        # Make a calculation
+        #plot_n_and_Jz(variable_set, states, quantum_numbers)
+        Lindbladian(variable_set, states, quantum_numbers, plot_mode="3D")
+
+    # Development: SEOP
+    elif specific_example == 7:
+        SEOP_Dicke_model()
+
+    # Development: spin squeezing
+    elif specific_example == 8:
+    
+        # Set frequencies
+        ω, ω0 = 0.1, 10
+        λ_critical = (ω * ω0)**(1/2)/2
+        
+        # Initialize model
+        init_Dicke_model(n_max=48, N=4)
+
+        # Generate all eigenstates and eigenvalues
+        variable_set = np.linspace(0, 3*λ_critical, 101)
+        states       = calculate_states(variable_set)
+
+        # Sort eigenstates and eigenvalues
+        states, quantum_numbers = quantum_numbers_sorting(states, sort='P', secondary_sort='E')
+        
+        # Select specific eigenstates
+        selected_states = [0, int(len(states[0][0])/2)] # [0, 1, int(len(states[0][0])/2), int(len(states[0][0])/2)+1]
+        states          = [states[0][:,selected_states], states[1][:,:,selected_states]]
+        quantum_numbers = quantum_numbers[:,selected_states]
+        
+        ΔJ_x = uncertainty(states, J_x)
+        
+        plot_results([[(f"$λ$", f"$ΔJ_x^2$"), (variable_set, ΔJ_x), (0, 0), ('plot')]],
+                      quantum_numbers = quantum_numbers)
+
     else:
         print('There are no examples with this value.')
 
