@@ -325,11 +325,11 @@ def Lindbladian(variable_set, states, quantum_numbers, plot_mode="2D"):
     # Set time parameters
     t_max     = 5   # set time interval
     t_shift   = 0    # set start time
-    dt        = 0.1  # set time steps
+    dt        = 0.001  # set time steps
     times     = np.linspace(t_shift, t_max+t_shift, int((t_max-t_shift) / dt))
 
     # Set Lindbladian operators
-    L = [J_m, J_z] # set as [np.eye(J_z.shape[0])] to retain Schrodinger equation
+    L = [np.eye(J_z.shape[0])] # set as [np.eye(J_z.shape[0])] to retain Schrodinger equation
 
     # Initialize data container for plotting
     plot_list = []
@@ -706,12 +706,14 @@ def examples(specific_example=0):
     # Example 0: simple spectrum
     if specific_example == 0:
     
-        # Set frequencies
-        ω, ω0 = 1, 1
+        # Set parameters
+        ω, ω0      = 1, 1
+        n_max, N   = 2, 1
         λ_critical = (ω * ω0)**(1/2)/2
+        print_parameters(ω, ω0, n_max, N)
     
         # Initialize model
-        init_Dicke_model(n_max=2, N=1)
+        init_Dicke_model(n_max, N)
 
         # Generate all eigenstates and eigenvalues
         variable_set = np.linspace(0, 3*λ_critical, 101)
@@ -721,15 +723,16 @@ def examples(specific_example=0):
         states, quantum_numbers = quantum_numbers_sorting(states, sort='P', secondary_sort='E')
 
         # Make a calculation
-        print(f"")
         plot_spectrum(variable_set, states, quantum_numbers)
     
     # Example 1: cavity occupation
     elif specific_example == 1:
     
-        # Set frequencies
-        ω, ω0 = 0.1, 10
+        # Set parameters
+        ω, ω0      = 0.1, 10
+        n_max, N   = 24, 2
         λ_critical = (ω * ω0)**(1/2)/2
+        print_parameters(ω, ω0, n_max, N)
 
         # Initialize model
         init_Dicke_model(n_max=24, N=2)
@@ -752,9 +755,11 @@ def examples(specific_example=0):
     # Example 2: dense spectrum
     elif specific_example == 2:
     
-        # Set frequencies
-        ω, ω0 = 0.1, 10
+        # Set parameters
+        ω, ω0      = 0.1, 10
+        n_max, N   = 48, 4
         λ_critical = (ω * ω0)**(1/2)/2
+        print_parameters(ω, ω0, n_max, N)
         
         # Initialize model
         init_Dicke_model(n_max=48, N=4)
@@ -772,9 +777,11 @@ def examples(specific_example=0):
     # Example 3: resonance (avoided crossings)
     elif specific_example == 3:
     
-        # Set frequencies
-        ω, ω0 = 1, 1
+        # Set parameters
+        ω, ω0      = 1, 1
+        n_max, N   = 48, 4
         λ_critical = (ω * ω0)**(1/2)/2
+        print_parameters(ω, ω0, n_max, N)
         
         # Initialize model
         init_Dicke_model(n_max=48, N=4)
@@ -792,12 +799,15 @@ def examples(specific_example=0):
     # Example 4: bifurcations
     elif specific_example == 4:
     
-        # Set frequencies
-        ω, ω0 = 0.1, 10
+        global H
+
+        # Set parameters
+        ω, ω0      = 0.1, 10
+        n_max, N   = 24, 2
         λ_critical = (ω * ω0)**(1/2)/2
+        print_parameters(ω, ω0, n_max, N)
         
         # Initialize model
-        n_max, N = 48, 4
         create_J_operators(N)              # creates J_p, J_m, J_x, J_y, and J_z given number of particles 
         create_a_operators(n_max)          # creates a and a_dag given number of available energy levels
         compute_tensor_products(n_max, N)  # updates J_p, J_m, J_x, J_y, J_z, a, and a_dag to the full Hilbert space
@@ -820,15 +830,17 @@ def examples(specific_example=0):
     # Development: Chebyshev evolution
     elif specific_example == 5:
     
-        # Set frequencies
-        ω, ω0 = 0.1, 10
+        # Set parameters
+        ω, ω0      = 0.1, 10
+        n_max, N   = 24, 2
         λ_critical = (ω * ω0)**(1/2)/2
+        print_parameters(ω, ω0, n_max, N)
         
         # Initialize model
-        init_Dicke_model(n_max=48, N=4)
+        init_Dicke_model(n_max, N)
 
         # Generate all eigenstates and eigenvalues
-        variable_set = np.linspace(0, 2*λ_critical, 11)
+        variable_set = np.linspace(0, 2*λ_critical, 101)
         states       = calculate_states(variable_set)
 
         # Sort eigenstates and eigenvalues
@@ -840,19 +852,20 @@ def examples(specific_example=0):
         quantum_numbers = quantum_numbers[:,selected_states]
 
         # Make a calculation
-        #plot_n_and_Jz(variable_set, states, quantum_numbers)
-        #Lindbladian(variable_set, states, quantum_numbers, plot_mode="2D")
-        Chebyshift(variable_set, states, quantum_numbers=quantum_numbers, plot_mode="3D")
+        plot_n_and_Jz(variable_set, states, quantum_numbers)
+        #Chebyshift(variable_set, states, quantum_numbers=quantum_numbers, plot_mode="3D")
 
     # Development: Lindbladian evolution
     elif specific_example == 6:
     
-        # Set frequencies
+        # Set parameters
         ω, ω0 = 0.1, 10
+        n_max, N = 24, 2
         λ_critical = (ω * ω0)**(1/2)/2
+        print_parameters(ω, ω0, n_max, N)
         
         # Initialize model
-        init_Dicke_model(n_max=48, N=4)
+        init_Dicke_model(n_max, N)
 
         # Generate all eigenstates and eigenvalues
         variable_set = np.linspace(0, 2*λ_critical, 11)
@@ -867,7 +880,6 @@ def examples(specific_example=0):
         quantum_numbers = quantum_numbers[:,selected_states]
 
         # Make a calculation
-        #plot_n_and_Jz(variable_set, states, quantum_numbers)
         Lindbladian(variable_set, states, quantum_numbers, plot_mode="3D")
 
     # Development: SEOP
@@ -877,9 +889,11 @@ def examples(specific_example=0):
     # Development: spin squeezing
     elif specific_example == 8:
     
-        # Set frequencies
-        ω, ω0 = 0.1, 10
+        # Set parameters
+        ω, ω0      = 0.1, 10
+        n_max, N   = 48, 4
         λ_critical = (ω * ω0)**(1/2)/2
+        print_parameters(ω, ω0, n_max, N)
         
         # Initialize model
         init_Dicke_model(n_max=48, N=4)
@@ -955,7 +969,7 @@ def plot_results(results, quantum_numbers=None, plot_mode="2D"):
             return cmap(capped_value)  # Returns RGBA color
 
         # Loop through results for individual 2D plots
-        for labels, values, indices, style in tqdm(results, desc=f"{'plotting results':<35}"):
+        for labels, values, indices, style in results:
 
             ax = fig.add_subplot(gs[indices[0], indices[1]])
             ax.set_xlabel(labels[0], fontsize=16)
@@ -1128,6 +1142,13 @@ def quantum_numbers_sorting(states, sort=None, secondary_sort=None, sort_dict={}
 
     return [sorted_states_0, sorted_states_1], np.array(sorted_expectations)
 
+def print_parameters(ω, ω0, n_max, N):
+    print(f"{'field frequency:':<35}{ω}\n"
+          f"{'atomic frequency:':<35}{ω0}\n"
+          f"{'critical coupling:':<35}{(ω * ω0)**(1/2)/2}\n"
+          f"{'number of modes:':<35}{n_max}\n"
+          f"{'number of particles:':<35}{N}\n")
+
 ########################################################################################################################################################
 # WIP
 def Chebyshift(variable_set, states, quantum_numbers=None, plot_mode="2D"):
@@ -1162,7 +1183,7 @@ def Chebyshift(variable_set, states, quantum_numbers=None, plot_mode="2D"):
         # Iteratively compute higher-order terms
         for n in range(1, num_terms):
         
-            Tn = np.zeros(T0.shape[0], dtype=np.complex128).reshape((4, 1))
+            Tn = np.zeros(T0.shape[0], dtype=np.complex128).reshape((psi0.shape[0], 1))
             Tn += 2 * (H_scaled @ T1) - T0
 
             # Add the contribution of the nth term
@@ -1178,7 +1199,7 @@ def Chebyshift(variable_set, states, quantum_numbers=None, plot_mode="2D"):
     plot_list = []
 
     # Cycle through trials
-    for i in tqdm(range(len(states[1])), desc='...'):
+    for i in tqdm(range(len(states[1])), desc=f"{'calculating evolution':<35}"):
         expectation_values = []
         
         # Cycle through states
@@ -1187,7 +1208,7 @@ def Chebyshift(variable_set, states, quantum_numbers=None, plot_mode="2D"):
 
             # Evolve state
             measures = []
-            state = states[1][i][:,j].reshape((4, 1))
+            state = states[1][i][:,j].reshape((states[1][i][:,j].shape[0], 1))
             
             for t in times:
             
@@ -1211,7 +1232,7 @@ def Chebyshift(variable_set, states, quantum_numbers=None, plot_mode="2D"):
 ########################################################################################################################################################
 # Main
 def main():
-    examples(5)
+    examples(6)
 
 if __name__ == "__main__":
     main()
