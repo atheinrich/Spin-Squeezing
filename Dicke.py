@@ -421,7 +421,7 @@ def Chebyshift(variable_set, states, quantum_numbers=None, plot_mode="2D"):
     from scipy.sparse import identity, csr_matrix
     from scipy.sparse.linalg import eigsh, LinearOperator
     
-    def chebyshev_time_evolution(H, input_state, t, num_terms=100):
+    def chebyshev_time_evolution(H, input_state, t, num_terms):
     
         # Estimate the max and min eigenvalues of H
         E_min, E_max = eigsh(H, k=2, which='BE', return_eigenvectors=False)
@@ -451,12 +451,12 @@ def Chebyshift(variable_set, states, quantum_numbers=None, plot_mode="2D"):
             # Update for the next iteration
             T0, T1 = T1, Tn
         
-        return np.real(T1)
+        return output_state
   
     # Set time parameters
     t_max   = 1   # set time interval
     t_shift = 0   # set start time
-    dt      = 0.1 # set time steps
+    dt      = 0.01 # set time steps
     times   = np.linspace(t_shift, t_max+t_shift, int((t_max-t_shift) / dt))
 
     # Set iteration length
@@ -484,13 +484,13 @@ def Chebyshift(variable_set, states, quantum_numbers=None, plot_mode="2D"):
                 state_evolved = state_evolved / np.linalg.norm(state_evolved)
                 
                 # Calculate a property of the evolved state (e.g., probability |state_evolved|^2)
-                measure = expectation(J_z, state_evolved, single_state=True)
+                measure = expectation(H(variable_set[i]), state_evolved, single_state=True)
                 
                 # Store the total measure at this time step (or any other property of interest)
                 expectation_values[j].append(measure)
 
         expectation_values = np.array(expectation_values).T
-        plot_list.append([(f"$t$", f"$⟨J_z⟩,   λ={round(variable_set[i],2)}$"), 
+        plot_list.append([(f"$t,\tλ={round(variable_set[i],2)}$", f"$⟨E⟩$"), 
                           (times, expectation_values), 
                           (0, i), 
                           ('plot')])
@@ -920,7 +920,7 @@ def examples(specific_example=0):
     
         # Set parameters
         ω, ω0      = 0.1, 10
-        n_max, N   = 2, 1
+        n_max, N   = 12, 2
         λ_critical = (ω * ω0)**(1/2)/2
         print_parameters(ω, ω0, n_max, N)
         
@@ -934,13 +934,13 @@ def examples(specific_example=0):
         # Sort eigenstates and eigenvalues
         states, quantum_numbers = quantum_numbers_sorting(states, sort='P', secondary_sort='E')
 
+        plot_spectrum(variable_set, states, quantum_numbers)
+
         # Select specific eigenstates
-        selected_states = [0, int(len(states[0][0])/2)] # [0, 1, int(len(states[0][0])/2), int(len(states[0][0])/2)+1]
-        states          = [states[0][:,selected_states], states[1][:,:,selected_states]]
-        quantum_numbers = quantum_numbers[:,selected_states]
+        states, quantum_numbers = state_creator(variable_set, states, quantum_numbers, selection="random")
 
         # Make a calculation
-        Chebyshift(variable_set, states, quantum_numbers=quantum_numbers, plot_mode="3D")
+        Chebyshift(variable_set, states, quantum_numbers, plot_mode="3D")
 
     # Development: Lindbladian evolution
     elif specific_example == 6:
@@ -962,13 +962,10 @@ def examples(specific_example=0):
         states, quantum_numbers = quantum_numbers_sorting(states, sort='P', secondary_sort='E')
 
         # Select specific eigenstates
-        selected_states = [0, int(len(states[0][0])/2)] # [0, 1, int(len(states[0][0])/2), int(len(states[0][0])/2)+1]
-        states          = [states[0][:,selected_states], states[1][:,:,selected_states]]
-        quantum_numbers = quantum_numbers[:,selected_states]
+        states, quantum_numbers = state_creator(variable_set, states, quantum_numbers, selection="ground")
 
         # Make a calculation
         Lindbladian(variable_set, states, quantum_numbers, plot_mode="3D")
-        Chebyshift(variable_set, states, quantum_numbers=quantum_numbers, plot_mode="3D")
 
     # Development: SEOP
     elif specific_example == 7:
@@ -1095,8 +1092,8 @@ def plot_results(results, quantum_numbers=None, plot_mode="2D"):
             for trial in range(z.shape[1]):
                 ax.plot(x, y[:, trial], z[:, trial])
 
-        ax.set_xlabel("Time", fontsize=12)
-        ax.set_zlabel("⟨J_z⟩", fontsize=12)
+        ax.set_xlabel(f"$t$", fontsize=12)
+        ax.set_zlabel(labels[1], fontsize=12)
         plt.show()
 
 def find_quantum_numbers(states, precision=10, sort=None, secondary_sort=None, sort_dict={}):
@@ -1238,9 +1235,44 @@ def print_parameters(ω, ω0, n_max, N):
           f"{'number of particles:':<35}{N}\n")
 
 ########################################################################################################################################################
+# WIP
+def state_creator(variable_set, states, quantum_numbers, selection="ground"):
+    
+    # Legacy control; change this as needed
+    if selection == "custom":
+        selected_states = [0, int(len(states[0][0])/2)] # [0, 1, int(len(states[0][0])/2), int(len(states[0][0])/2)+1]
+        states          = [states[0][:,selected_states], states[1][:,:,selected_states]]
+        quantum_numbers = quantum_numbers[:,selected_states]
+        return states, quantum_numbers
+    
+    # Return ground state for each parity
+    elif selection == "ground":
+        selected_states = [0, int(len(states[0][0])/2)] # [0, 1, int(len(states[0][0])/2), int(len(states[0][0])/2)+1]
+        states          = [states[0][:,selected_states], states[1][:,:,selected_states]]
+        quantum_numbers = quantum_numbers[:,selected_states]
+        return states, quantum_numbers
+    
+    # Return one random state
+    elif selection == "random":
+        new_states = [[], []]
+    
+        # Sort through trials
+        for i in range(len(states[1])):        
+            new_state = states[1][i][:,0] + states[1][i][:,2]
+            new_state = (new_state / np.linalg.norm(new_state)).reshape((new_state.shape[0], 1))
+            
+            new_energy = expectation(H(variable_set[i]), new_state)
+            
+            new_states[0].append(new_energy)
+            new_states[1].append(new_state)
+        new_states = [np.array(new_states[0]), np.array(new_states[1])]
+        
+        return new_states, None
+
+########################################################################################################################################################
 # Main
 def main():
-    examples(8)
+    examples(5)
 
 if __name__ == "__main__":
     main()
