@@ -319,59 +319,6 @@ def Dicke_Hamiltonian(N):
     H_int   = 2 * ℏ / np.sqrt(N) * (a + a_dag) @ J_x   # quantifies the interaction between the atoms and the field
     H       = lambda λ: H_field + H_atom + λ*H_int # sums the total energy and sets the interaction strength
 
-def Lindbladian(variable_set, states, quantum_numbers, plot_mode="2D"):
-    global H, J_m
-
-    # Set time parameters
-    t_max     = 5   # set time interval
-    t_shift   = 0    # set start time
-    dt        = 0.001  # set time steps
-    times     = np.linspace(t_shift, t_max+t_shift, int((t_max-t_shift) / dt))
-
-    # Set Lindbladian operators
-    L = [np.eye(J_z.shape[0])] # set as [np.eye(J_z.shape[0])] to retain Schrodinger equation
-
-    # Initialize data container for plotting
-    plot_list = []
-
-    # Sort through each λ
-    for i in range(len(variable_set)):
-
-        # Initialize data container for plotting
-        expectation_values = []
-
-        # Generate density matrices
-        ρ_array = []
-        for j in range(states[1][i].shape[1]):
-            ρ_array.append(np.outer(states[1][i][:,j], states[1][i][:,j].conj()))
-        ρ_array = np.array(ρ_array)
-
-        # Sort through density matrices
-        for j in range(len(ρ_array)):
-            ρ = ρ_array[j]
-            expectation_values.append([])
-
-            # Sort through each time step
-            for t in tqdm(range(len(times)), desc=f"{'calculating Lindbladian':<35}"):
-
-                # Store observable for plotting
-                expectation_values[j].append(np.real(np.trace(J_z @ ρ)))
-
-                # Construct the Lindbladian and evolve the density matrix
-                dρ = -1j * (H(variable_set[i]) @ ρ - ρ @ H(variable_set[i]))
-                for M in L:
-                    anticommutator = (M.conj().T @ M) @ ρ + ρ @ (M.conj().T @ M)
-                    dρ += M @ (ρ @ M.conj().T) - (1/2) * anticommutator
-                ρ = ρ + dt * dρ
-                
-        expectation_values = np.array(expectation_values).T
-        plot_list.append([(f"$t$", f"$⟨J_z⟩,   λ={round(variable_set[i],2)}$"), 
-                          (times, expectation_values), 
-                          (0, i), 
-                          ('plot')])
-
-    plot_results(plot_list, quantum_numbers=quantum_numbers, plot_mode=plot_mode)
-
 ########################################################################################################################################################
 # Operations
 def eigenstates(matrix, ground_state=False):
@@ -406,26 +353,33 @@ def expectation(operator, state, single_state=True):
         Parameters
         ----------
         operator     : 2D array
-        state:       : 1D or 2D array
-        single_state : sets whether state is 1D or 2D
+        state:       : standard or column vector
+        single_state : flags as column vector
         
         Returns
         -------
         expectation_value : float; single_state=True yields one number 
         expectation_array : 2D array; single_state=False has one row per λ """
     
+    # Single column vector
     if single_state:
-        expectation_value = state @ operator @ np.conj(state).T
-        return expectation_value
+        expectation_value = np.conj(state).T @ operator @ state
+        return np.real(expectation_value.item())
     
+    # Standard data container
     else:
         expectation_array = []
+        
+        # Sort through trials
         for i in tqdm(range(len(state[1])), desc=f"{'calculating expectation values':<35}"):
+            
+            # Sort through states
             temp_list_1 = []
             for j in range(len(state[1][i][0])):
-                temp_list_2 = expectation(operator, state[1][i][:,j])
+                temp_list_2 = expectation(operator, state[1][i][:,j].reshape((state[1][i][:,j].shape[0], 1)))
                 temp_list_1.append(temp_list_2)
             expectation_array.append(np.array(temp_list_1).T)
+        
         return np.array(expectation_array)
 
 def uncertainty(states, operator):
@@ -461,6 +415,140 @@ def partial_trace(ρ, dim_A, dim_B, trace_out):
     elif trace_out == 'A':
         ρ_reduced = np.trace(ρ, axis1=0, axis2=2)
     return ρ_reduced
+
+def Chebyshift(variable_set, states, quantum_numbers=None, plot_mode="2D"):
+    from scipy.special import jv  # Bessel function of the first kind
+    from scipy.sparse import identity, csr_matrix
+    from scipy.sparse.linalg import eigsh, LinearOperator
+    
+    def chebyshev_time_evolution(H, input_state, t, num_terms=100):
+    
+        # Estimate the max and min eigenvalues of H
+        E_min, E_max = eigsh(H, k=2, which='BE', return_eigenvectors=False)
+        
+        psi_cache = np.zeros_like(input_state, dtype=np.complex128)
+        input_state = psi_cache+input_state
+
+        # Scale the Hamiltonian
+        H_scaled = (2 * H - (E_max + E_min) * csr_matrix(identity(H.shape[0]))) / (E_max - E_min)
+
+        # Initial Chebyshev polynomials
+        T0 = input_state
+        T1 = H_scaled @ input_state
+        
+        # Time evolution result (initialized with the first term)
+        output_state = jv(0, t * (E_max - E_min) / 2) * T0
+        
+        # Iteratively compute higher-order terms
+        for n in range(1, num_terms):
+        
+            Tn = np.zeros(T0.shape[0], dtype=np.complex128).reshape((input_state.shape[0], 1))
+            Tn += 2 * (H_scaled @ T1) - T0
+
+            # Add the contribution of the nth term
+            output_state += (2 * (-1j)**n * jv(n, t * (E_max - E_min) / 2)) * Tn
+            
+            # Update for the next iteration
+            T0, T1 = T1, Tn
+        
+        return np.real(T1)
+  
+    # Set time parameters
+    t_max   = 1   # set time interval
+    t_shift = 0   # set start time
+    dt      = 0.1 # set time steps
+    times   = np.linspace(t_shift, t_max+t_shift, int((t_max-t_shift) / dt))
+
+    # Set iteration length
+    num_terms = 10
+
+    # Initialize data container
+    plot_list = []
+
+    # Cycle through trials
+    for i in tqdm(range(len(states[1])), desc=f"{'calculating evolution':<35}"):
+        expectation_values = []
+        
+        # Cycle through states
+        for j in range(states[1][i].shape[1]):
+            expectation_values.append([])
+
+            # Extract column vector
+            state = states[1][i][:,j].reshape((states[1][i][:,j].shape[0], 1))
+            
+            # Evolve state
+            for t in times:
+            
+                # Compute the time-evolved state at time t
+                state_evolved = chebyshev_time_evolution(H(variable_set[i]), state, t, num_terms)
+                state_evolved = state_evolved / np.linalg.norm(state_evolved)
+                
+                # Calculate a property of the evolved state (e.g., probability |state_evolved|^2)
+                measure = expectation(J_z, state_evolved, single_state=True)
+                
+                # Store the total measure at this time step (or any other property of interest)
+                expectation_values[j].append(measure)
+
+        expectation_values = np.array(expectation_values).T
+        plot_list.append([(f"$t$", f"$⟨J_z⟩,   λ={round(variable_set[i],2)}$"), 
+                          (times, expectation_values), 
+                          (0, i), 
+                          ('plot')])
+
+    plot_results(plot_list, quantum_numbers=quantum_numbers, plot_mode=plot_mode)
+    
+def Lindbladian(variable_set, states, quantum_numbers, plot_mode="2D"):
+    global H, J_m
+
+    # Set time parameters
+    t_max     = 1   # set time interval
+    t_shift   = 0    # set start time
+    dt        = 0.1  # set time steps
+    times     = np.linspace(t_shift, t_max+t_shift, int((t_max-t_shift) / dt))
+
+    # Set Lindbladian operators
+    L = [np.eye(J_z.shape[0])] # set as [np.eye(J_z.shape[0])] to retain Schrodinger equation
+
+    # Initialize data container for plotting
+    plot_list = []
+
+    # Sort through each λ
+    for i in tqdm(range(len(variable_set)), desc=f"{'calculating Lindbladian':<35}"):
+
+        # Initialize data container for plotting
+        expectation_values = []
+
+        # Generate density matrices
+        ρ_array = []
+        for j in range(states[1][i].shape[1]):
+            ρ_array.append(np.outer(states[1][i][:,j], states[1][i][:,j].conj()))
+        ρ_array = np.array(ρ_array)
+
+        # Sort through density matrices
+        for j in range(len(ρ_array)):
+            ρ = ρ_array[j]
+            expectation_values.append([])
+
+            # Sort through each time step
+            for t in range(len(times)):
+
+                # Store observable for plotting
+                expectation_values[j].append(np.real(np.trace(J_z @ ρ)))
+
+                # Construct the Lindbladian and evolve the density matrix
+                dρ = -1j * (H(variable_set[i]) @ ρ - ρ @ H(variable_set[i]))
+                for M in L:
+                    anticommutator = (M.conj().T @ M) @ ρ + ρ @ (M.conj().T @ M)
+                    dρ += M @ (ρ @ M.conj().T) - (1/2) * anticommutator
+                ρ = ρ + dt * dρ
+                
+        expectation_values = np.array(expectation_values).T
+        plot_list.append([(f"$t$", f"$⟨J_z⟩,   λ={round(variable_set[i],2)}$"), 
+                          (times, expectation_values), 
+                          (0, i), 
+                          ('plot')])
+
+    plot_results(plot_list, quantum_numbers=quantum_numbers, plot_mode=plot_mode)
 
 ########################################################################################################################################################
 # Algorithms
@@ -832,7 +920,7 @@ def examples(specific_example=0):
     
         # Set parameters
         ω, ω0      = 0.1, 10
-        n_max, N   = 24, 2
+        n_max, N   = 2, 1
         λ_critical = (ω * ω0)**(1/2)/2
         print_parameters(ω, ω0, n_max, N)
         
@@ -840,7 +928,7 @@ def examples(specific_example=0):
         init_Dicke_model(n_max, N)
 
         # Generate all eigenstates and eigenvalues
-        variable_set = np.linspace(0, 2*λ_critical, 101)
+        variable_set = np.linspace(0, 2*λ_critical, 11)
         states       = calculate_states(variable_set)
 
         # Sort eigenstates and eigenvalues
@@ -852,8 +940,7 @@ def examples(specific_example=0):
         quantum_numbers = quantum_numbers[:,selected_states]
 
         # Make a calculation
-        plot_n_and_Jz(variable_set, states, quantum_numbers)
-        #Chebyshift(variable_set, states, quantum_numbers=quantum_numbers, plot_mode="3D")
+        Chebyshift(variable_set, states, quantum_numbers=quantum_numbers, plot_mode="3D")
 
     # Development: Lindbladian evolution
     elif specific_example == 6:
@@ -881,6 +968,7 @@ def examples(specific_example=0):
 
         # Make a calculation
         Lindbladian(variable_set, states, quantum_numbers, plot_mode="3D")
+        Chebyshift(variable_set, states, quantum_numbers=quantum_numbers, plot_mode="3D")
 
     # Development: SEOP
     elif specific_example == 7:
@@ -1039,9 +1127,9 @@ def find_quantum_numbers(states, precision=10, sort=None, secondary_sort=None, s
         
         # Calculate all quantum numbers (|P, n, J_z, E⟩)
         if sort == None:
-            P_expectations   = [expectation(P,         states[1][i][:, j]) for j in range(len(states[1][0][0]))]
-            n_expectations   = [expectation(a_dag @ a, states[1][i][:, j]) for j in range(len(states[1][0][0]))]
-            J_z_expectations = [expectation(J_z,       states[1][i][:, j]) for j in range(len(states[1][0][0]))]
+            P_expectations   = [expectation(P,         states[1][i][:,j].reshape((states[1][i][:,j].shape[0], 1))) for j in range(len(states[1][0][0]))]
+            n_expectations   = [expectation(a_dag @ a, states[1][i][:,j].reshape((states[1][i][:,j].shape[0], 1))) for j in range(len(states[1][0][0]))]
+            J_z_expectations = [expectation(J_z,       states[1][i][:,j].reshape((states[1][i][:,j].shape[0], 1))) for j in range(len(states[1][0][0]))]
             E_expectations   = states[0][i]
 
             for k in range(len(states[0][i])):
@@ -1065,7 +1153,7 @@ def find_quantum_numbers(states, precision=10, sort=None, secondary_sort=None, s
                 
                 # Calculate quantum number
                 else:
-                    expectations_cache = [expectation(sort_dict[sort], states[1][i][:, j]) for j in range(len(states[1][0][0]))]
+                    expectations_cache = [expectation(sort_dict[sort], states[1][i][:,j].reshape((states[1][i][:,j].shape[0], 1))) for j in range(len(states[1][0][0]))]
                     for k in range(len(states[0][i])):
                         expectations_rounded.append([round(expectations_cache[k], set_precision)])
                     expectation_list.append(np.array(expectations_rounded))
@@ -1077,13 +1165,13 @@ def find_quantum_numbers(states, precision=10, sort=None, secondary_sort=None, s
                 if sort == 'E':
                     expectations_cache_1 = states[0][i]
                 else:
-                    expectations_cache_1 = [expectation(sort_dict[sort], states[1][i][:, j]) for j in range(len(states[1][0][0]))]
+                    expectations_cache_1 = [expectation(sort_dict[sort], states[1][i][:,j].reshape((states[1][i][:,j].shape[0], 1))) for j in range(len(states[1][0][0]))]
                 
                 # Calculate second number
                 if secondary_sort == 'E':
                     expectations_cache_2 = states[0][i]
                 else:
-                    expectations_cache_2 = [expectation(sort_dict[secondary_sort], states[1][i][:, j]) for j in range(len(states[1][0][0]))]
+                    expectations_cache_2 = [expectation(sort_dict[secondary_sort], states[1][i][:,j].reshape((states[1][i][:,j].shape[0], 1))) for j in range(len(states[1][0][0]))]
                 for k in range(len(states[0][i])):
                     expectations_rounded.append([round(np.real(expectations_cache_1[k]), set_precision),
                                                  round(np.real(expectations_cache_2[k]), set_precision)])
@@ -1150,89 +1238,9 @@ def print_parameters(ω, ω0, n_max, N):
           f"{'number of particles:':<35}{N}\n")
 
 ########################################################################################################################################################
-# WIP
-def Chebyshift(variable_set, states, quantum_numbers=None, plot_mode="2D"):
-    from scipy.special import jv  # Bessel function of the first kind
-    from scipy.sparse import identity, csr_matrix
-    from scipy.sparse.linalg import eigsh, LinearOperator
-    
-    # Set time parameters
-    t_max      = 5   # set time interval
-    t_shift    = 0    # set start time
-    dt         = 0.1  # set time steps
-    times   = np.linspace(t_shift, t_max+t_shift, int((t_max-t_shift) / dt))
-
-    def chebyshev_time_evolution(H, psi0, t, num_terms=100):
-        # Estimate the max and min eigenvalues of H
-        E_min, E_max = eigsh(H, k=2, which='BE', return_eigenvectors=False)
-        
-        psi_cache = np.zeros_like(psi0, dtype=np.complex128)
-        psi0 = psi_cache+psi0
-
-        # Scale the Hamiltonian
-        H_scaled = (2 * H - (E_max + E_min) * csr_matrix(identity(H.shape[0]))) / (E_max - E_min)
-        
-        # Initial Chebyshev polynomials
-        T0 = psi0
-        T1 = H_scaled @ psi0
-        T1 = T1
-        
-        # Time evolution result (initialized with the first term)
-        psi_t = jv(0, t * (E_max - E_min) / 2) * T0
-        
-        # Iteratively compute higher-order terms
-        for n in range(1, num_terms):
-        
-            Tn = np.zeros(T0.shape[0], dtype=np.complex128).reshape((psi0.shape[0], 1))
-            Tn += 2 * (H_scaled @ T1) - T0
-
-            # Add the contribution of the nth term
-            psi_t += (2 * (-1j)**n * jv(n, t * (E_max - E_min) / 2)) * Tn
-            
-            # Update for the next iteration
-            T0, T1 = T1, Tn
-        return T1
-
-    # Number of Chebyshev terms to use (higher number -> better accuracy)
-    num_terms = 10
-
-    plot_list = []
-
-    # Cycle through trials
-    for i in tqdm(range(len(states[1])), desc=f"{'calculating evolution':<35}"):
-        expectation_values = []
-        
-        # Cycle through states
-        for j in range(states[1][i].shape[1]):
-            expectation_values.append([])
-
-            # Evolve state
-            measures = []
-            state = states[1][i][:,j].reshape((states[1][i][:,j].shape[0], 1))
-            
-            for t in times:
-            
-                # Compute the time-evolved state at time t
-                psi_t = chebyshev_time_evolution(H(variable_set[i]), state, t, num_terms)
-                
-                # Calculate a property of the evolved state (e.g., probability |psi_t|^2)
-                measure = expectation(J_z, psi_t.T, single_state=True)[0][0]
-                
-                # Store the total measure at this time step (or any other property of interest)
-                expectation_values[j].append(np.real(measure))
-
-        expectation_values = np.array(expectation_values).T
-        plot_list.append([(f"$t$", f"$⟨J_z⟩,   λ={round(variable_set[i],2)}$"), 
-                          (times, expectation_values), 
-                          (0, i), 
-                          ('plot')])
-
-    plot_results(plot_list, quantum_numbers=quantum_numbers, plot_mode=plot_mode)
-    
-########################################################################################################################################################
 # Main
 def main():
-    examples(6)
+    examples(8)
 
 if __name__ == "__main__":
     main()
