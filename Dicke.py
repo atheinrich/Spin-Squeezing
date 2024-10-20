@@ -22,15 +22,13 @@
     C) Run a customized calculation using the following steps in the command line.
        1)  Set the maximum excitation level (n_max) and the number of atoms (N)
        2)  Generate the Dicke Hamiltonian with init_Dicke_model(N, n_max) using those values
-       3a) Plot ground state expectation values as a function of λ using plot_n_and_Jz()
-       3b) Plot all eigenvalues as functions of λ using plot_spectrum()
+       3a) Plot ground state expectation values as a function of λ using occupation()
+       3b) Plot all eigenvalues as functions of λ using spectrum()
 
     Works in progress (WIP)
     -----------------------
-    plot_spectrum() : works for ground states and multiple excited states 
-    plot_n_and_Jz() : works for ground states, but does not work for excited states
-    other           : try x=c(a†+a) with c → λ_default
-    other           : convert everything to OOP """
+    other        : try x=c(a†+a) with c → λ_default
+    other        : convert everything to OOP """
 
 """ Organization
     ============
@@ -385,13 +383,38 @@ def expectation(operator, state, single_state=True):
 def uncertainty(states, operator):
     """ Calculates the standard deviation of a given operator and a set of states. """
 
+    # Initialize data containers
     expectations, output = [[], []], []
+    
+    # Calculate expectation values
     expectations[0] = expectation(operator,          states, single_state=False)
     expectations[1] = expectation(operator@operator, states, single_state=False)
+    
+    # Use expectation values to calculate uncertainty
     for i in range(len(expectations[0])):
         cache = []
         for j in range(len(list(expectations[0][i]))):
-            cache.append(np.sqrt(list(expectations[1])[i][j]-list(expectations[0])[i][j]**2))
+            cache.append(np.sqrt(abs(list(expectations[1])[i][j]-list(expectations[0])[i][j]**2)))
+        output.append(cache)
+    return np.array(output)
+
+def bosonic_squeezing(states):
+    """ Calculates the standard deviation of a given operator and a set of states. """
+
+    # Initialize data containers
+    expectations, output = [[], [], []], []
+    
+    # Calculate expectation values
+    expectations[0] = expectation(a_dag@a, states, single_state=False)
+    expectations[1] = expectation(a,       states, single_state=False)
+    expectations[2] = expectation(a@a,     states, single_state=False)
+    
+    # Use expectation values to calculate uncertainty
+    for i in range(len(expectations[0])):
+        cache = []
+        for j in range(len(list(expectations[0][i]))):
+            factor = 1 + 2*(expectations[0][i][j] - abs(expectations[1][i][j])**2 - abs(expectations[2][i][j] - expectations[1][i][j]**2))
+            cache.append(factor)
         output.append(cache)
     return np.array(output)
 
@@ -416,7 +439,36 @@ def partial_trace(ρ, dim_A, dim_B, trace_out):
         ρ_reduced = np.trace(ρ, axis1=0, axis2=2)
     return ρ_reduced
 
-def Chebyshift(variable_set, states, quantum_numbers=None, plot_mode="2D"):
+########################################################################################################################################################
+# Algorithms
+def occupation(variable_set, states):
+    """ Prepare ⟨n⟩ and ⟨J_z⟩ for plotting. """
+    
+    # Calculate expectation values
+    n_expectations   = expectation(a_dag@a, states, single_state=False)
+    J_x_expectations = expectation(J_x,     states, single_state=False)
+    J_z_expectations = expectation(J_z,     states, single_state=False)
+    
+    # Construct and return plot list
+    plot_list = [[(f"$λ$", f"$⟨n⟩$"),   (variable_set, n_expectations),   (0, 1), ('plot')],
+                 [(f"$λ$", f"$⟨J_x⟩$"), (variable_set, J_x_expectations), (1, 0), ('plot')],
+                 [(f"$λ$", f"$⟨J_z⟩$"), (variable_set, J_z_expectations), (1, 2), ('plot')]]
+    return plot_list
+
+def spectrum(variable_set, states):
+    """ Prepare energy eigenvalues for plotting.
+    
+        Optional
+        --------
+        Subtract the ground state energy from all eigenvalues
+            for i in range(len(states[0])):
+                for j in range(len(states[0][0])): 
+                    val = states[0][i].copy()[0]
+                    states[0][i][-(j+1)] -= val """
+
+    return [[(f"$λ$", f"$E$"), (variable_set, states[0]), (0, 0), ('plot')]]
+
+def Chebyshift(variable_set, states):
     from scipy.special import jv  # Bessel function of the first kind
     from scipy.sparse import identity, csr_matrix
     from scipy.sparse.linalg import eigsh, LinearOperator
@@ -494,20 +546,19 @@ def Chebyshift(variable_set, states, quantum_numbers=None, plot_mode="2D"):
                           (times, expectation_values), 
                           (0, i), 
                           ('plot')])
-
-    plot_results(plot_list, quantum_numbers=quantum_numbers, plot_mode=plot_mode)
+    return plot_list
     
-def Lindbladian(variable_set, states, quantum_numbers, plot_mode="2D"):
+def Lindbladian(variable_set, states):
     global H, J_m
 
     # Set time parameters
     t_max     = 1   # set time interval
     t_shift   = 0    # set start time
-    dt        = 0.1  # set time steps
+    dt        = 0.01  # set time steps
     times     = np.linspace(t_shift, t_max+t_shift, int((t_max-t_shift) / dt))
 
     # Set Lindbladian operators
-    L = [np.eye(J_z.shape[0])] # set as [np.eye(J_z.shape[0])] to retain Schrodinger equation
+    L = [J_m] # set as [np.eye(J_z.shape[0])] to retain Schrodinger equation
 
     # Initialize data container for plotting
     plot_list = []
@@ -543,45 +594,11 @@ def Lindbladian(variable_set, states, quantum_numbers, plot_mode="2D"):
                 ρ = ρ + dt * dρ
                 
         expectation_values = np.array(expectation_values).T
-        plot_list.append([(f"$t$", f"$⟨J_z⟩,   λ={round(variable_set[i],2)}$"), 
+        plot_list.append([(f"$t, λ={round(variable_set[i],2)}$", f"$⟨J_z⟩$"), 
                           (times, expectation_values), 
                           (0, i), 
                           ('plot')])
-
-    plot_results(plot_list, quantum_numbers=quantum_numbers, plot_mode=plot_mode)
-
-########################################################################################################################################################
-# Algorithms
-def plot_n_and_Jz(variable_set, states, quantum_numbers=None):
-    """ Generate and plot ⟨n⟩ and ⟨Jz⟩ for each ground state as a function of λ. """
-        
-    # Calculate expectation values
-    n_expectations   = expectation(a_dag@a, states, single_state=False)
-    J_x_expectations = expectation(J_x,     states, single_state=False)
-    J_y_expectations = expectation(J_y,     states, single_state=False)
-    J_z_expectations = expectation(J_z,     states, single_state=False)
-    
-    # Just a weird bug fix
-    J_y_expectations = np.real(J_y_expectations)
-    
-    plot_results([[(f"$λ$", f"$⟨n⟩$"),   (variable_set, n_expectations),   (0, 1), ('plot')],
-                  [(f"$λ$", f"$⟨J_x⟩$"), (variable_set, J_x_expectations), (1, 0), ('plot')],
-                  [(f"$λ$", f"$⟨J_z⟩$"), (variable_set, J_z_expectations), (1, 2), ('plot')]],
-                  quantum_numbers = quantum_numbers)
-
-def plot_spectrum(variable_set, states, quantum_numbers=None):
-    """ Generate and plot energy eigenvalues.
-    
-        Optional
-        --------
-        Subtract the ground state energy from all eigenvalues
-            for i in range(len(states[0])):
-                for j in range(len(states[0][0])): 
-                    val = states[0][i].copy()[0]
-                    states[0][i][-(j+1)] -= val """
-
-    plot_results([[(f"$λ$", f"$E$"), (variable_set, states[0]), (0, 0), ('plot')]],
-                   quantum_numbers = quantum_numbers)
+    return plot_list
 
 def init_Dicke_model(n_max, N):
     """ Creates operators and the Hamiltonian for the basic Dicke model with variable coupling strength.
@@ -668,7 +685,7 @@ def SEOP_Dicke_model():
     states, quantum_numbers = quantum_numbers_sorting(states, sort='P', secondary_sort='E')
 
     # Define custom plotting
-    def plot_n_S(variable_set, states, quantum_numbers):
+    def SEOP_occupation(variable_set, states, quantum_numbers):
     
         # Select specific eigenstates
         selected_states = [0, int(len(states[0][0])/2)]
@@ -679,14 +696,16 @@ def SEOP_Dicke_model():
         J_x_expectations = expectation(I_z,     states, single_state=False)
         J_z_expectations = expectation(S_z,     states, single_state=False)
         
-        plot_results([[(f"$λ$", f"$⟨n⟩$"),   (variable_set, n_expectations),   (0, 1), ('plot')],
-                      [(f"$λ$", f"$⟨I_z⟩$"), (variable_set, J_x_expectations), (1, 0), ('plot')],
-                      [(f"$λ$", f"$⟨J_z⟩$"), (variable_set, J_z_expectations), (1, 2), ('plot')]],
-                      quantum_numbers = quantum_numbers)
+        plot_list = [[(f"$λ$", f"$⟨n⟩$"),   (variable_set, n_expectations),   (0, 1), ('plot')],
+                     [(f"$λ$", f"$⟨I_z⟩$"), (variable_set, J_x_expectations), (1, 0), ('plot')],
+                     [(f"$λ$", f"$⟨J_z⟩$"), (variable_set, J_z_expectations), (1, 2), ('plot')]]
+        return plot_list
     
     # Make a calculation
-    plot_spectrum(variable_set, states, quantum_numbers)
-    plot_n_S(variable_set, states, quantum_numbers)
+    spectrum_plot_list   = spectrum(variable_set, states, quantum_numbers)
+    occupation_plot_list = SEOP_occupation(variable_set, states, quantum_numbers)
+    plot_results(spectrum_plot_list,   quantum_numbers)
+    plot_results(occupation_plot_list, quantum_numbers)
 
 def two_spin_Dicke_model():
     """ Spin-exchange optical pumping model
@@ -774,7 +793,7 @@ def two_spin_Dicke_model():
                       quantum_numbers = quantum_numbers)
     
     # Make a calculation
-    #plot_spectrum(variable_set, states, quantum_numbers)
+    #spectrum(variable_set, states, quantum_numbers)
     plot_n_S(variable_set, states, quantum_numbers)
 
 def examples(specific_example=0):
@@ -803,7 +822,7 @@ def examples(specific_example=0):
         # Initialize model
         init_Dicke_model(n_max, N)
 
-        # Generate all eigenstates and eigenvalues
+        # Generate eigenstates and eigenvalues
         variable_set = np.linspace(0, 3*λ_critical, 101)
         states       = calculate_states(variable_set)
 
@@ -811,21 +830,22 @@ def examples(specific_example=0):
         states, quantum_numbers = quantum_numbers_sorting(states, sort='P', secondary_sort='E')
 
         # Make a calculation
-        plot_spectrum(variable_set, states, quantum_numbers)
+        plot_list = spectrum(variable_set, states)
+        plot_results(plot_list, quantum_numbers)
     
     # Example 1: cavity occupation
     elif specific_example == 1:
     
         # Set parameters
         ω, ω0      = 0.1, 10
-        n_max, N   = 24, 2
+        n_max, N   = 24,  2
         λ_critical = (ω * ω0)**(1/2)/2
         print_parameters(ω, ω0, n_max, N)
 
         # Initialize model
         init_Dicke_model(n_max=24, N=2)
 
-        # Generate all eigenstates and eigenvalues
+        # Generate eigenstates and eigenvalues
         variable_set = np.linspace(0, 3*λ_critical, 101)
         states       = calculate_states(variable_set)
 
@@ -833,26 +853,25 @@ def examples(specific_example=0):
         states, quantum_numbers = quantum_numbers_sorting(states, sort='P', secondary_sort='E')
 
         # Select specific eigenstates
-        selected_states = [0, int(len(states[0][0])/2)]
-        states          = [states[0][:,selected_states], states[1][:,:,selected_states]]
-        quantum_numbers = quantum_numbers[:,selected_states]
+        states, quantum_numbers = select_states(variable_set, states, quantum_numbers, selection="ground")
 
         # Make a calculation
-        plot_n_and_Jz(variable_set, states, quantum_numbers)
+        plot_list = occupation(variable_set, states)
+        plot_results(plot_list, quantum_numbers)
     
     # Example 2: dense spectrum
     elif specific_example == 2:
     
         # Set parameters
         ω, ω0      = 0.1, 10
-        n_max, N   = 48, 4
+        n_max, N   = 48,  4
         λ_critical = (ω * ω0)**(1/2)/2
         print_parameters(ω, ω0, n_max, N)
         
         # Initialize model
         init_Dicke_model(n_max=48, N=4)
 
-        # Generate all eigenstates and eigenvalues
+        # Generate eigenstates and eigenvalues
         variable_set = np.linspace(0, 3*λ_critical, 101)
         states       = calculate_states(variable_set)
 
@@ -860,13 +879,14 @@ def examples(specific_example=0):
         states, quantum_numbers = quantum_numbers_sorting(states, sort='P', secondary_sort='E')
 
         # Make a calculation
-        plot_spectrum(variable_set, states, quantum_numbers)
+        plot_list = spectrum(variable_set, states)
+        plot_results(plot_list, quantum_numbers)
     
     # Example 3: resonance (avoided crossings)
     elif specific_example == 3:
     
         # Set parameters
-        ω, ω0      = 1, 1
+        ω, ω0      = 1,  1
         n_max, N   = 48, 4
         λ_critical = (ω * ω0)**(1/2)/2
         print_parameters(ω, ω0, n_max, N)
@@ -874,7 +894,7 @@ def examples(specific_example=0):
         # Initialize model
         init_Dicke_model(n_max=48, N=4)
 
-        # Generate all eigenstates and eigenvalues
+        # Generate eigenstates and eigenvalues
         variable_set = np.linspace(0, 3*λ_critical, 101)
         states       = calculate_states(variable_set)
 
@@ -882,7 +902,8 @@ def examples(specific_example=0):
         states, quantum_numbers = quantum_numbers_sorting(states, sort='P', secondary_sort='E')
 
         # Make a calculation
-        plot_spectrum(variable_set, states, quantum_numbers)
+        plot_list = spectrum(variable_set, states)
+        plot_results(plot_list, quantum_numbers)
     
     # Example 4: bifurcations
     elif specific_example == 4:
@@ -891,21 +912,21 @@ def examples(specific_example=0):
 
         # Set parameters
         ω, ω0      = 0.1, 10
-        n_max, N   = 24, 2
+        n_max, N   = 24,  2
         λ_critical = (ω * ω0)**(1/2)/2
         print_parameters(ω, ω0, n_max, N)
         
         # Initialize model
-        create_J_operators(N)              # creates J_p, J_m, J_x, J_y, and J_z given number of particles 
-        create_a_operators(n_max)          # creates a and a_dag given number of available energy levels
-        compute_tensor_products(n_max, N)  # updates J_p, J_m, J_x, J_y, J_z, a, and a_dag to the full Hilbert space
-        create_parity_operator()           # creates parity operator for sorting
+        create_J_operators(N)
+        create_a_operators(n_max)
+        compute_tensor_products(n_max, N)
+        create_parity_operator()
         H_field = ℏ * ω  * (a_dag @ a + a @ a)
         H_atom  = ℏ * ω0 * J_z
         H_int   = 2 * ℏ / np.sqrt(N) * (a + a_dag) @ J_x
         H       = lambda λ: H_field + H_atom + λ*H_int
 
-        # Generate all eigenstates and eigenvalues
+        # Generate eigenstates and eigenvalues
         variable_set = np.linspace(0, 10*λ_critical, 101)
         states       = calculate_states(variable_set)
 
@@ -913,48 +934,48 @@ def examples(specific_example=0):
         states, quantum_numbers = quantum_numbers_sorting(states, sort='P', secondary_sort='E')
 
         # Make a calculation
-        plot_spectrum(variable_set, states, quantum_numbers)
+        plot_list = spectrum(variable_set, states)
+        plot_results(plot_list, quantum_numbers)
     
-    # Development: Chebyshev evolution
+    # Example 5: Chebyshev evolution
     elif specific_example == 5:
     
         # Set parameters
         ω, ω0      = 0.1, 10
-        n_max, N   = 12, 2
+        n_max, N   = 12,  2
         λ_critical = (ω * ω0)**(1/2)/2
         print_parameters(ω, ω0, n_max, N)
         
         # Initialize model
         init_Dicke_model(n_max, N)
 
-        # Generate all eigenstates and eigenvalues
+        # Generate eigenstates and eigenvalues
         variable_set = np.linspace(0, 2*λ_critical, 11)
         states       = calculate_states(variable_set)
 
         # Sort eigenstates and eigenvalues
         states, quantum_numbers = quantum_numbers_sorting(states, sort='P', secondary_sort='E')
 
-        plot_spectrum(variable_set, states, quantum_numbers)
-
         # Select specific eigenstates
-        states, quantum_numbers = state_creator(variable_set, states, quantum_numbers, selection="random")
+        states, quantum_numbers = select_states(variable_set, states, quantum_numbers, selection="random")
 
         # Make a calculation
-        Chebyshift(variable_set, states, quantum_numbers, plot_mode="3D")
+        plot_list = Chebyshift(variable_set, states)
+        plot_results(plot_list, quantum_numbers, plot_mode="3D")
 
-    # Development: Lindbladian evolution
+    # Example 6: Lindbladian evolution
     elif specific_example == 6:
     
         # Set parameters
-        ω, ω0 = 0.1, 10
-        n_max, N = 24, 2
+        ω, ω0    = 0.1, 10
+        n_max, N = 24,  2
         λ_critical = (ω * ω0)**(1/2)/2
         print_parameters(ω, ω0, n_max, N)
         
         # Initialize model
         init_Dicke_model(n_max, N)
 
-        # Generate all eigenstates and eigenvalues
+        # Generate eigenstates and eigenvalues
         variable_set = np.linspace(0, 2*λ_critical, 11)
         states       = calculate_states(variable_set)
 
@@ -962,21 +983,22 @@ def examples(specific_example=0):
         states, quantum_numbers = quantum_numbers_sorting(states, sort='P', secondary_sort='E')
 
         # Select specific eigenstates
-        states, quantum_numbers = state_creator(variable_set, states, quantum_numbers, selection="ground")
+        states, quantum_numbers = select_states(variable_set, states, quantum_numbers, selection="ground")
 
         # Make a calculation
-        Lindbladian(variable_set, states, quantum_numbers, plot_mode="3D")
+        plot_list = Lindbladian(variable_set, states)
+        plot_results(plot_list, quantum_numbers, plot_mode="3D")
 
-    # Development: SEOP
+    # Example 7: SEOP
     elif specific_example == 7:
         SEOP_Dicke_model()
 
-    # Development: spin squeezing
+    # Example 8: spin squeezing
     elif specific_example == 8:
     
         # Set parameters
         ω, ω0      = 0.1, 10
-        n_max, N   = 48, 4
+        n_max, N   = 48,  4
         λ_critical = (ω * ω0)**(1/2)/2
         print_parameters(ω, ω0, n_max, N)
         
@@ -991,14 +1013,18 @@ def examples(specific_example=0):
         states, quantum_numbers = quantum_numbers_sorting(states, sort='P', secondary_sort='E')
         
         # Select specific eigenstates
-        selected_states = [0, int(len(states[0][0])/2)] # [0, 1, int(len(states[0][0])/2), int(len(states[0][0])/2)+1]
-        states          = [states[0][:,selected_states], states[1][:,:,selected_states]]
-        quantum_numbers = quantum_numbers[:,selected_states]
+        states, quantum_numbers = select_states(variable_set, states, quantum_numbers, selection="ground")
         
+        # Make a calculation
         ΔJ_x = uncertainty(states, J_x)
-        
-        plot_results([[(f"$λ$", f"$ΔJ_x^2$"), (variable_set, ΔJ_x), (0, 0), ('plot')]],
-                      quantum_numbers = quantum_numbers)
+        ΔJ_y = uncertainty(states, J_y)
+        ΔJ_z = uncertainty(states, J_z)
+        ζ = bosonic_squeezing(states)
+        plot_list = [[(f"$λ$", f"$ζ^2$"),    (variable_set, ζ),    (0, 1), ('plot')],
+                     [(f"$λ$", f"$ΔJ_x^2$"), (variable_set, ΔJ_x), (1, 0), ('plot')],
+                     [(f"$λ$", f"$ΔJ_y^2$"), (variable_set, ΔJ_y), (1, 1), ('plot')],
+                     [(f"$λ$", f"$ΔJ_z^2$"), (variable_set, ΔJ_z), (1, 2), ('plot')]]
+        plot_results(plot_list, quantum_numbers)
 
     else:
         print('There are no examples with this value.')
@@ -1007,7 +1033,7 @@ def examples(specific_example=0):
 # Utility
 def calculate_states(variable_set, ground_state=False):
     """ Computes states in the standard representation.
-        Only defined out of convenience, since I run these codes frequently. """
+        See data descriptions in Summary for more details. """
     
     eigenvalues, eigenvectors = [], []
     for λ in tqdm(variable_set, desc=f"{'finding eigenstates':<35}"):
@@ -1015,6 +1041,84 @@ def calculate_states(variable_set, ground_state=False):
         eigenvalues.append(eigenvalue)
         eigenvectors.append(eigenvector)  
     return [np.array(eigenvalues), np.array(eigenvectors)] 
+
+def select_states(variable_set, states, quantum_numbers, selection="ground"):
+    """ Custructs sets of states from a set of eigenstates.
+    
+        Parameters
+        ----------
+        variable_set    : 1D array; typically a range of coupling strengths
+        states          : 3D array; standard representation
+        quantum_numbers : 3D array; standard representation
+        selection       : string in {"manual", "ground", "random"}
+                          "manual" is intended to be changed to whatever is needed at the time
+                          "ground" yields the ground state for each parity
+                          "random" yields a single state as a weighted superposition of eigenstates
+        
+        Returns
+        -------
+        states          : 3D array; standard representation
+        quantum_numbers : 3D array; standard representation """
+    
+    # Manual state selection
+    if selection == "manual":
+    
+        # Select eigenstates by index under given sorting (usually energy)
+        selected_states = [0, int(len(states[0][0])/2)]
+        
+        # Update and return states
+        states          = [states[0][:,selected_states], states[1][:,:,selected_states]]
+        quantum_numbers = quantum_numbers[:,selected_states]
+        return states, quantum_numbers
+    
+    # Ground states
+    elif selection == "ground":
+    
+        # Choose ground state for each parity
+        selected_states = [0, int(len(states[0][0])/2)] # [0, 1, int(len(states[0][0])/2), int(len(states[0][0])/2)+1]
+        
+        # Update and return states
+        states          = [states[0][:,selected_states], states[1][:,:,selected_states]]
+        quantum_numbers = quantum_numbers[:,selected_states]
+        return states, quantum_numbers
+    
+    # Random state
+    elif selection == "random":
+    
+        # Initialize data container
+        new_states = [[], []]
+        
+        # Initialize randomization
+        seed               = 1
+        rng                = np.random.default_rng(seed)
+        
+        # Choose how many eigenstates to include
+        num_eigenstates    = rng.integers(low=1, high=states[0][0].shape[0])
+        
+        # Choose random eigenstates and weights for each eigenstate
+        random_eigenstates = rng.integers(low=0, high=states[0][0].shape[0], size=num_eigenstates)
+        random_weights     = rng.uniform(0, 1, num_eigenstates)
+        
+        # Sort through trials
+        for i in range(len(states[1])):
+        
+            # Construct state
+            new_state = np.zeros_like(states[1][0][:,0])
+            for j in range(num_eigenstates):
+                new_state += random_weights[j] * states[1][i][:,random_eigenstates[j]]
+            
+            # Normalize and recast as column vector
+            new_state = (new_state / np.linalg.norm(new_state)).reshape((new_state.shape[0], 1))
+            
+            # Calculate energy
+            new_energy = expectation(H(variable_set[i]), new_state)
+            
+            # Append to data container
+            new_states[0].append(new_energy)
+            new_states[1].append(new_state)
+        
+        new_states = [np.array(new_states[0]), np.array(new_states[1])]
+        return new_states, None
 
 def plot_results(results, quantum_numbers=None, plot_mode="2D"):
     """ Plots input data using GridSpec.
@@ -1033,6 +1137,7 @@ def plot_results(results, quantum_numbers=None, plot_mode="2D"):
         style   : (plot_type);               ex. ('plot') or ('contour') """
     
     if plot_mode == "2D":
+    
         # Initialize grid size based on 2D plot indices
         try:
             max_row = max(item[2][0] for item in results) + 1
@@ -1077,24 +1182,25 @@ def plot_results(results, quantum_numbers=None, plot_mode="2D"):
 
         plt.tight_layout()
         plt.show()
-
+    
+    # 3D plotting
     elif plot_mode == "3D":
-        # For 3D plotting, a single 3D plot
         fig = plt.figure(figsize=(10, 8))
         ax = fig.add_subplot(111, projection='3d')
 
         for i, (labels, values, indices, style) in enumerate(results):
-            x = values[0]  # times
-            y = np.full_like(values[1], i)  # Trial index as y-axis
-            z = values[1]  # expectation values
+            x = values[0]
+            y = np.full_like(values[1], i)
+            z = values[1]
 
-            # Plot each trial in the 3D plot
             for trial in range(z.shape[1]):
                 ax.plot(x, y[:, trial], z[:, trial])
 
         ax.set_xlabel(f"$t$", fontsize=12)
         ax.set_zlabel(labels[1], fontsize=12)
         plt.show()
+    
+    print()
 
 def find_quantum_numbers(states, precision=10, sort=None, secondary_sort=None, sort_dict={}):
     """ Find quantum numbers for each eigenstate at λ=0, assuming H has been constructed.
@@ -1228,51 +1334,18 @@ def quantum_numbers_sorting(states, sort=None, secondary_sort=None, sort_dict={}
     return [sorted_states_0, sorted_states_1], np.array(sorted_expectations)
 
 def print_parameters(ω, ω0, n_max, N):
-    print(f"{'field frequency:':<35}{ω}\n"
+    print(f"\n-----------------------------------------\n"
+          f"{'field frequency:':<35}{ω}\n"
           f"{'atomic frequency:':<35}{ω0}\n"
           f"{'critical coupling:':<35}{(ω * ω0)**(1/2)/2}\n"
           f"{'number of modes:':<35}{n_max}\n"
-          f"{'number of particles:':<35}{N}\n")
-
-########################################################################################################################################################
-# WIP
-def state_creator(variable_set, states, quantum_numbers, selection="ground"):
-    
-    # Legacy control; change this as needed
-    if selection == "custom":
-        selected_states = [0, int(len(states[0][0])/2)] # [0, 1, int(len(states[0][0])/2), int(len(states[0][0])/2)+1]
-        states          = [states[0][:,selected_states], states[1][:,:,selected_states]]
-        quantum_numbers = quantum_numbers[:,selected_states]
-        return states, quantum_numbers
-    
-    # Return ground state for each parity
-    elif selection == "ground":
-        selected_states = [0, int(len(states[0][0])/2)] # [0, 1, int(len(states[0][0])/2), int(len(states[0][0])/2)+1]
-        states          = [states[0][:,selected_states], states[1][:,:,selected_states]]
-        quantum_numbers = quantum_numbers[:,selected_states]
-        return states, quantum_numbers
-    
-    # Return one random state
-    elif selection == "random":
-        new_states = [[], []]
-    
-        # Sort through trials
-        for i in range(len(states[1])):        
-            new_state = states[1][i][:,0] + states[1][i][:,2]
-            new_state = (new_state / np.linalg.norm(new_state)).reshape((new_state.shape[0], 1))
-            
-            new_energy = expectation(H(variable_set[i]), new_state)
-            
-            new_states[0].append(new_energy)
-            new_states[1].append(new_state)
-        new_states = [np.array(new_states[0]), np.array(new_states[1])]
-        
-        return new_states, None
+          f"{'number of particles:':<35}{N}\n"
+          f"-----------------------------------------\n")
 
 ########################################################################################################################################################
 # Main
 def main():
-    examples(5)
+    examples(8)
 
 if __name__ == "__main__":
     main()
