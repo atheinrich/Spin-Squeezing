@@ -277,6 +277,8 @@ def create_parity_operator():
                     P[i][j] = np.imag(P[i][j])
     P = np.real(P)
 
+    return P
+
 def compute_tensor_products(n_max, N):
     """ Takes the tensor product of the field and atom operators and yields the full Hamiltonian.
         
@@ -296,6 +298,8 @@ def compute_tensor_products(n_max, N):
     J_y   = np.kron(np.eye(n_max), J_y) 
     J_z   = np.kron(np.eye(n_max), J_z) # yields the total m_j value, but does not alter the number of photons
 
+    return {'J_x': J_x, 'J_y': J_y, 'J_z': J_z, 'J_m': J_m, 'J_p': J_p, 'a': a, 'a_dag': a_dag}
+
 def Dicke_Hamiltonian(N):
     """ Constructs the Hamiltonian given global operator values.
         
@@ -313,6 +317,8 @@ def Dicke_Hamiltonian(N):
     H_atom  = ℏ * ω0 * J_z                 # counts the energy of each spin
     H_int   = 2 * ℏ / np.sqrt(N) * (a + a_dag) @ J_x   # quantifies the interaction between the atoms and the field
     H       = lambda λ: H_field + H_atom + λ*H_int # sums the total energy and sets the interaction strength
+
+    return H
 
 ########################################################################################################################################################
 # Operations
@@ -521,7 +527,7 @@ def find_entropy(variable_set, states, dim_A, dim_B):
     
     plot_list = [[(f"$λ$", f"$𝒮_Σ$"), (variable_set, entropy_tot),   (0, 0), ('plot')],
                  [(f"$λ$", f"$𝒮_γ$"), (variable_set, entropy_field), (0, 1), ('plot')],
-                 [(f"$λ$", f"$𝒮_S$"), (variable_set, eigensum_spin), (0, 2), ('plot')]]
+                 [(f"$λ$", f"$(|ρ|^T-1)/2$"), (variable_set, eigensum_spin), (0, 2), ('plot')]]
     return plot_list
 
 def Chebyshift(variable_set, states):
@@ -1054,7 +1060,7 @@ def examples(specific_example=0):
     
         # Set parameters
         ω, ω0      = 0.1, 10
-        n_max, N   = 48,  4
+        n_max, N   = 32, 32
         λ_critical = (ω * ω0)**(1/2)/2
         print_parameters(ω, ω0, n_max, N)
         
@@ -1100,8 +1106,8 @@ def examples(specific_example=0):
     elif specific_example == 9:
     
         # Set parameters
-        ω, ω0      = 1,  1
-        n_max, N   = 32, 4
+        ω, ω0      = 0.1,  10
+        n_max, N   = 32, 32
         λ_critical = (ω * ω0)**(1/2)/2
         print_parameters(ω, ω0, n_max, N)
         
@@ -1486,11 +1492,97 @@ def partial_transpose(ρ):
     
     return eigensum
 
+class System:
+    def __init__(self, ω=1, ω0=1, n_max=32, N=32, qs=True):
+        """ Initializes operators and parameters.
+            Parameters
+            ----------
+            qs : Boolean; quick start sets a default variable and finds states """
+        
+        # Initialize parameters
+        self.ω     = ω
+        self.ω0    = ω0
+        self.n_max = n_max
+        self.N     = N
+        self.crit  = (ω * ω0)**(1/2)/2
+        
+        # Create operators
+        create_J_operators(N)
+        create_a_operators(n_max)
+        operator_dict = compute_tensor_products(n_max, N)
+        self.J_x   = operator_dict['J_x']
+        self.J_y   = operator_dict['J_y']
+        self.J_z   = operator_dict['J_z']
+        self.J_m   = operator_dict['J_m']
+        self.J_p   = operator_dict['J_p']
+        self.a     = operator_dict['a']
+        self.a_dag = operator_dict['a_dag']
+        self.P     = create_parity_operator()
+        self.H     = Dicke_Hamiltonian(N)
+        del operator_dict
+
+        # Set variable and find states
+        if qs:
+            vars = np.linspace(1e-10, 3*λ_critical, 101)
+            self.find_states(vars)
+            self.sort_states()
+
+    def find_states(self, vars):
+        self.vars   = vars
+        self.states = calculate_states(vars)
+
+    def sort_states(self, sort_1='P', sort_2='E'):
+        self.states, self.quantum_numbers = sort_by_quantum_numbers(self.states, sort=sort_1, secondary_sort=sort_2)
+
+    def select_states(self, set_selection='ground', backup=True, restore=False):
+        if restore:
+            self.states          = self.states_backup
+            self.quantum_numbers = self.quantum_numbers_backup
+
+        elif backup:
+            self.states_backup            = self.states
+            self.quantum_numbers_backup   = self.quantum_numbers
+
+        self.states, self.quantum_numbers = select_states(self.vars, self.states, self.quantum_numbers, selection=set_selection)
+
+    def plot(self, type):
+        if type == 'spectrum':
+            plot_list = find_spectrum(self.vars, self.states)
+        elif type == 'occupation':
+            plot_list = find_occupation(self.vars, self.states)
+        elif type == 'squeezing':
+            ΔJ_x      = uncertainty(self.states, self.J_x)
+            ΔJ_y      = uncertainty(self.states, self.J_y)
+            ΔJ_z      = uncertainty(self.states, self.J_z)
+            J_x_exp   = expectation(self.J_x, self.states, single_state=False)
+            J_x_exp   = tolerance_check(J_x_exp)
+            J_y_exp   = expectation(self.J_y, self.states, single_state=False)
+            J_z_exp   = expectation(self.J_z, self.states, single_state=False)
+            product_1 = ΔJ_x * ΔJ_y
+            product_2 = ΔJ_y * ΔJ_z
+            product_3 = ΔJ_x * ΔJ_z
+            ζ         = bosonic_squeezing(self.states)
+            plot_list = [[(f"", f"$ζ^2$"),      (self.vars, ζ),         (0, 1), ('plot')],
+                         [(f"", f"$⟨J_x⟩$"),    (self.vars, J_x_exp),   (1, 0), ('plot')],
+                         [(f"", f"$⟨J_y⟩$"),    (self.vars, J_y_exp),   (1, 1), ('plot')],
+                         [(f"", f"$⟨J_z⟩$"),    (self.vars, J_z_exp),   (1, 2), ('plot')],
+                         [(f"", f"$ΔJ_x$"),     (self.vars, ΔJ_x),      (2, 0), ('plot')],
+                         [(f"", f"$ΔJ_y$"),     (self.vars, ΔJ_y),      (2, 1), ('plot')],
+                         [(f"", f"$ΔJ_z$"),     (self.vars, ΔJ_z),      (2, 2), ('plot')],
+                         [(f"", f"$ΔJ_xΔJ_y$"), (self.vars, product_1), (3, 0), ('plot')],
+                         [(f"", f"$ΔJ_yΔJ_z$"), (self.vars, product_2), (3, 1), ('plot')],
+                         [(f"", f"$ΔJ_xΔJ_z$"), (self.vars, product_3), (3, 2), ('plot')]]
+        elif type == 'entropy':
+            plot_list = find_entropy(self.vars, self.states, self.n_max, m_J(self.N))
+        else:
+            print('Try a different keyword.')
+
+        plot_results(plot_list, self.quantum_numbers)
 
 ########################################################################################################################################################
 # Main
 def main():
-    examples(8)
+    examples(9)
 
 if __name__ == "__main__":
     main()
