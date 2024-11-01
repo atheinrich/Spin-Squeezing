@@ -16,15 +16,19 @@
 
     Command line example
     --------------------
-    sys = System(qs=True) # generate system with default parameters
-    sys.print()           # view parameters
-    sys.plot('spectrum')  # plot the full spectrum
-    sys.N = 2             # change the number of atoms
-    sys.update()          # update the system to account for the new number of atoms
-    sys.plot('spectrum')  # plot the full spectrum
-    sys.save()            # save data
-    sys = examples(0)     # update the system to a preset example
-    sys = sys.load()      # load the previous system """
+    sys = examples(0)                         # load a preset example
+    sys.N = 2                                 # change the number of atoms
+    sys.update()                              # update the system to account for the new number of atoms
+    sys.plot('occupation')                    # plot ⟨n⟩ and ⟨J_z⟩
+    sys = System(1,1,4,4)                     # generate a new system with custom parameters
+    sys.print()                               # view parameters
+    sys.plot('spectrum')                      # plot ⟨n⟩ and ⟨J_z⟩
+    sys.save()                                # save data
+    sys = System(1,1,4,4, indiv=True)         # generate a new system with custom parameters
+    sys.select([[0],[0]])                     # select the ground state for each parity
+    sys.plot('spins')                         # plot ⟨J_z⟩ for each individual spin
+    sys = sys.load()                          # load the previous system
+    uncertainty(sys.J_x, sys.states, sys=sys) # plot ΔJ_x """
 
 """ Organization
 
@@ -119,32 +123,37 @@ def create_J_operators(sys, j_set=None, individual=False):
     
     # Construct operators in full space, rather than collective space
     if individual:
-        identity = np.eye(2)
-
+    
+        # Initialize some stuff
         dim = 2**sys.N
         J_x = np.zeros((dim, dim), dtype=complex)
         J_y = np.zeros((dim, dim), dtype=complex)
         J_z = np.zeros((dim, dim), dtype=complex)
+        J_z_list = []
         
+        # Sort through each spin
         for i in range(sys.N):
             J_x_cache = 1
             J_y_cache = 1
             J_z_cache = 1
             
+            # Sort through all the other spins
             for j in range(sys.N):
                 if j == i:
-                    J_x_cache = np.kron(J_x_cache, (sys.ℏ/2) * np.array([[0, 1], [1, 0]]))
+                    J_x_cache = np.kron(J_x_cache, (sys.ℏ/2) * np.array([[0, 1],   [1, 0]]))
                     J_y_cache = np.kron(J_y_cache, (sys.ℏ/2) * np.array([[0, -1j], [1j, 0]]))
-                    J_z_cache = np.kron(J_z_cache, (sys.ℏ/2) * np.array([[1, 0], [0, -1]]))
+                    J_z_cache = np.kron(J_z_cache, (sys.ℏ/2) * np.array([[1, 0],   [0, -1]]))
                 else:
                     J_x_cache = np.kron(J_x_cache, np.eye(2))
                     J_y_cache = np.kron(J_y_cache, np.eye(2))
                     J_z_cache = np.kron(J_z_cache, np.eye(2))
+            J_z_list.append(np.kron(np.eye(sys.n_max), J_z_cache))
             
-            # Add to the sum
             J_x += J_x_cache
             J_y += J_y_cache
             J_z += J_z_cache
+        
+        sys.J_z_list = J_z_list
         J_m = (J_x - 1j * J_y) / 2
         J_p = (J_x + 1j * J_y) / 2
     
@@ -253,7 +262,7 @@ def eigenstates(matrix):
     eigenvalues, eigenvectors = np.linalg.eig(matrix)
     return [eigenvalues, eigenvectors]
 
-def expectation(operator, state, single_state=True):
+def expectation(operator, state, single_state=False, sys=None):
     """ Just shorthand for some numpy methods. 
         
         Parameters
@@ -265,7 +274,8 @@ def expectation(operator, state, single_state=True):
         Returns
         -------
         expectation_value : float; single_state=True yields one number 
-        expectation_array : 2D array; single_state=False has one row per λ """
+        expectation_array : 2D array; single_state=False has one row per λ
+        sys               : commandline use; plots directly """
     
     # Single column vector
     if single_state:
@@ -282,21 +292,25 @@ def expectation(operator, state, single_state=True):
             # Sort through states
             temp_list_1 = []
             for j in range(len(state[1][i][0])):
-                temp_list_2 = expectation(operator, row_to_column(state[1][i][:,j]))
+                temp_list_2 = expectation(operator, row_to_column(state[1][i][:,j]), single_state=True)
                 temp_list_1.append(temp_list_2)
             expectation_array.append(np.array(temp_list_1).T)
         
-        return np.array(expectation_array)
+        if sys:
+            plot_list = [[(f"$λ$", f"$f(λ)$"), (sys.var, np.array(expectation_array)), (0, 0), ('plot')]]
+            plot_handling(plot_list)
+        else:
+            return np.array(expectation_array)
 
-def uncertainty(operator, states):
+def uncertainty(operator, states, sys=None):
     """ Calculates the standard deviation of a given operator and a set of states. """
 
     # Initialize data containers
     expectations, output = [[], []], []
     
     # Calculate expectation values
-    expectations[0] = expectation(operator,            states, single_state=False)
-    expectations[1] = expectation(operator @ operator, states, single_state=False)
+    expectations[0] = (operator, states)
+    expectations[1] = expectation(operator @ operator, states)
     
     # Use expectation values to calculate uncertainty
     for i in range(len(expectations[0])):
@@ -304,7 +318,12 @@ def uncertainty(operator, states):
         for j in range(len(list(expectations[0][i]))):
             cache.append(np.sqrt(abs(list(expectations[1])[i][j]-list(expectations[0])[i][j]**2)))
         output.append(cache)
-    return np.array(output)
+    
+    if sys:
+        plot_list = [[(f"$λ$", f"$f(λ)$"), (sys.var, np.array(expectation_array)), (0, 0), ('plot')]]
+        plot_handling(plot_list)
+    else:
+        return np.array(output)
 
 def partial_trace(ρ, dim_A, dim_B, subsystem):
     """ Computes the partial trace of a matrix.
@@ -373,12 +392,12 @@ def find_occupation(sys):
     """ Prepare ⟨n⟩ and ⟨J_z⟩ for plotting. """
     
     # Calculate expectation values
-    n_expectations    = expectation(sys.a_dag @ sys.a, sys.states, single_state=False)
-    J_z_expectations  = expectation(sys.J_z,           sys.states, single_state=False)
+    n_expectations    = expectation(sys.a_dag @ sys.a, sys.states)
+    J_z_expectations  = expectation(sys.J_z,           sys.states)
     
     # Construct and return plot list
-    plot_list = [[(f"$λ$", f"$⟨n⟩$"),   (sys.vars, n_expectations),   (0, 0), ('plot')],
-                 [(f"$λ$", f"$⟨J_z⟩$"), (sys.vars, J_z_expectations), (0, 1), ('plot')]]
+    plot_list = [[(f"$λ$", f"$⟨n⟩$"),   (sys.var, n_expectations),   (0, 0), ('plot')],
+                 [(f"$λ$", f"$⟨J_z⟩$"), (sys.var, J_z_expectations), (0, 1), ('plot')]]
     return plot_list
 
 def find_spectrum(sys):
@@ -392,7 +411,7 @@ def find_spectrum(sys):
                     val = states[0][i].copy()[0]
                     states[0][i][-(j+1)] -= val """
 
-    return [[(f"$λ$", f"$E$"), (sys.vars, sys.states[0]), (0, 0), ('plot')]]
+    return [[(f"$λ$", f"$E$"), (sys.var, sys.states[0]), (0, 0), ('plot')]]
 
 def find_entropy(sys):
     """ Computes von Neumann entropy and partial transposition for plotting. """
@@ -447,8 +466,8 @@ def find_entropy(sys):
             entropy_field[i][j] = von_Neumann_entropy(ρ_spin,  base=2)
             eigensum_spin[i][j] = (eigensum - 1)/2
     
-    plot_list = [[(f"$λ$", f"von Neumann entropy"), (sys.vars, entropy_field), (0, 0), ('plot')],
-                 [(f"$λ$", f"partial transpose"),   (sys.vars, eigensum_spin), (0, 1), ('plot')]]
+    plot_list = [[(f"$λ$", f"von Neumann entropy"), (sys.var, entropy_field), (0, 0), ('plot')],
+                 [(f"$λ$", f"partial transpose"),   (sys.var, eigensum_spin), (0, 1), ('plot')]]
     return plot_list
 
 def find_squeezing(sys):
@@ -458,9 +477,9 @@ def find_squeezing(sys):
     expectations, output = [[], [], []], []
     
     # Calculate expectation values
-    expectations[0] = expectation(sys.a_dag @ sys.a, sys.states, single_state=False)
-    expectations[1] = expectation(sys.a,             sys.states, single_state=False)
-    expectations[2] = expectation(sys.a @ sys.a,     sys.states, single_state=False)
+    expectations[0] = expectation(sys.a_dag @ sys.a, sys.states)
+    expectations[1] = expectation(sys.a,             sys.states)
+    expectations[2] = expectation(sys.a @ sys.a,     sys.states)
     
     # Use expectation values to calculate uncertainty
     for i in range(len(expectations[0])):
@@ -470,75 +489,6 @@ def find_squeezing(sys):
             cache.append(factor)
         output.append(cache)
     return np.array(output)
-
-def plot_data(sys, selection):
-    """ Generates data to be sent to plot_handling(). """
-    
-    sys.print('parameters')
-    sys.print('numbers')
-    
-    if selection == 'spectrum':
-        plot_list = find_spectrum(sys)
-        
-    elif selection == 'occupation':
-        plot_list = find_occupation(sys)
-        
-    elif selection == 'squeezing':
-        ΔJ_x      = uncertainty(sys.J_x, sys.states)
-        ΔJ_y      = uncertainty(sys.J_y, sys.states)
-        ΔJ_z      = uncertainty(sys.J_z, sys.states)
-        J_x_exp   = expectation(sys.J_x, sys.states, single_state=False)
-        J_x_exp   = tolerance_check(J_x_exp)
-        J_y_exp   = expectation(sys.J_y, sys.states, single_state=False)
-        J_z_exp   = expectation(sys.J_z, sys.states, single_state=False)
-        product_1 = ΔJ_x * ΔJ_y
-        product_2 = ΔJ_y * ΔJ_z
-        product_3 = ΔJ_x * ΔJ_z
-        ζ         = find_squeezing(sys)
-        plot_list = [[(f"", f"$ζ^2$"),      (sys.vars, ζ),         (0, 1), ('plot')],
-                     [(f"", f"$⟨J_x⟩$"),     (sys.vars, J_x_exp),   (1, 0), ('plot')],
-                     [(f"", f"$⟨J_y⟩$"),     (sys.vars, J_y_exp),   (1, 1), ('plot')],
-                     [(f"", f"$⟨J_z⟩$"),     (sys.vars, J_z_exp),   (1, 2), ('plot')],
-                     [(f"", f"$ΔJ_x$"),     (sys.vars, ΔJ_x),      (2, 0), ('plot')],
-                     [(f"", f"$ΔJ_y$"),     (sys.vars, ΔJ_y),      (2, 1), ('plot')],
-                     [(f"", f"$ΔJ_z$"),     (sys.vars, ΔJ_z),      (2, 2), ('plot')],
-                     [(f"", f"$ΔJ_xΔJ_y$"), (sys.vars, product_1), (3, 0), ('plot')],
-                     [(f"", f"$ΔJ_yΔJ_z$"), (sys.vars, product_2), (3, 1), ('plot')],
-                     [(f"", f"$ΔJ_xΔJ_z$"), (sys.vars, product_3), (3, 2), ('plot')]]
-    
-    elif selection == 'entropy':
-        plot_list = find_entropy(sys)
-    
-    elif selection == 'all':
-        plot_list_E       = find_spectrum(sys)
-        plot_list_E.append([(f"λ", f"$ζ^2$"), (sys.vars, find_squeezing(sys)), (0, 1), ('plot')])
-        plot_list_n_J     = find_occupation(sys)
-        plot_list_entropy = find_entropy(sys)
-        
-        # Save for later
-        sys.plot_lists = [[plot_list_E, plot_list_n_J, plot_list_entropy], sys.quantum_numbers]
-        
-        plot_handling(plot_list_E,       sys.quantum_numbers, no_show=True)
-        plot_handling(plot_list_n_J,     sys.quantum_numbers, no_show=True)
-        plot_handling(plot_list_entropy, sys.quantum_numbers, no_show=True)
-        plt.show()
-    
-    elif selection == 'last':
-        for i in range(len(sys.plot_lists[0])):
-            plot_handling(sys.plot_lists[0][i], sys.plot_lists[1], no_show=True)
-        plt.show()
-    
-    else:
-        print('Try a different keyword.')
-
-    # Look for plots whose handling was done above
-    if selection not in ['all', 'last']:
-        
-        # Save for later
-        sys.plot_lists = [[plot_list], sys.quantum_numbers]
-        
-        # Plot
-        plot_handling(plot_list, sys.quantum_numbers)    
 
 def examples(specific_example):
     """ Run a preset example.
@@ -580,8 +530,8 @@ def examples(specific_example):
                                        number_of_field_modes, number_of_atoms)
 
         # Generate eigenstates and eigenvalues
-        vars = np.linspace(1e-10, sys.crit, 101)
-        sys.Hamiltonian(vars)
+        var = np.linspace(1e-10, sys.crit, 101)
+        sys.Hamiltonian(var)
 
         # Sort eigenstates and eigenvalues
         sys.sort()
@@ -681,14 +631,14 @@ def examples(specific_example):
         H       = lambda λ: H_field + H_atom + λ*H_int
 
         # Generate eigenstates and eigenvalues
-        vars = np.linspace(1e-10, 10*λ_critical, 101)
-        states       = calculate_states(vars)
+        var = np.linspace(1e-10, 10*λ_critical, 101)
+        states       = calculate_states(var)
 
         # Sort eigenstates and eigenvalues
         states, quantum_numbers = sort_by_quantum_numbers(states, sort='P', secondary_sort='E')
 
         # Make a calculation
-        plot_list = find_spectrum(vars, states)
+        plot_list = find_spectrum(var, states)
         plot_handling(plot_list, quantum_numbers)
     
     # Development: Chebyshev evolution
@@ -704,17 +654,17 @@ def examples(specific_example):
         init_Dicke_model(n_max, N)
 
         # Generate eigenstates and eigenvalues
-        vars = np.linspace(1e-10, 2*λ_critical, 11)
-        states       = calculate_states(vars)
+        var = np.linspace(1e-10, 2*λ_critical, 11)
+        states       = calculate_states(var)
 
         # Sort eigenstates and eigenvalues
         states, quantum_numbers = sort_by_quantum_numbers(states, sort='P', secondary_sort='E')
 
         # Select specific eigenstates
-        states, quantum_numbers = select_states(vars, states, quantum_numbers, selection="random")
+        states, quantum_numbers = select_states(var, states, quantum_numbers, selection="random")
 
         # Make a calculation
-        plot_list = Chebyshift(vars, states)
+        plot_list = Chebyshift(var, states)
         plot_handling(plot_list, quantum_numbers, plot_mode="3D")
 
     # Development: Lindbladian evolution
@@ -730,17 +680,17 @@ def examples(specific_example):
         init_Dicke_model(n_max, N)
 
         # Generate eigenstates and eigenvalues
-        vars = np.linspace(1e-10, 2*λ_critical, 11)
-        states       = calculate_states(vars)
+        var = np.linspace(1e-10, 2*λ_critical, 11)
+        states       = calculate_states(var)
 
         # Sort eigenstates and eigenvalues
         states, quantum_numbers = sort_by_quantum_numbers(states, sort='P', secondary_sort='E')
 
         # Select specific eigenstates
-        states, quantum_numbers = select_states(vars, states, quantum_numbers, selection="ground")
+        states, quantum_numbers = select_states(var, states, quantum_numbers, selection="ground")
 
         # Make a calculation
-        plot_list = Lindbladian(vars, states)
+        plot_list = Lindbladian(var, states)
         plot_handling(plot_list, quantum_numbers, plot_mode="3D")
 
     # Development: SEOP
@@ -771,7 +721,7 @@ def select_states(sys, selection='ground'):
     
         Parameters
         ----------
-        vars            : 1D array; typically a range of coupling strengths
+        var            : 1D array; typically a range of coupling strengths
         states          : 3D array; standard representation
         quantum_numbers : 3D array; standard representation
         selection       : list or string
@@ -841,7 +791,7 @@ def select_states(sys, selection='ground'):
             new_state = (new_state / row_to_column(np.linalg.norm(new_state)))
             
             # Calculate energy
-            new_energy = expectation(sys.H(sys.vars[i]), new_state)
+            new_energy = expectation(sys.H(sys.var[i]), new_state)
             
             # Append to data container
             new_states[0].append([new_energy])
@@ -929,9 +879,9 @@ def calculate_quantum_numbers(sys, sort=None, secondary_sort=None, sort_dict={},
         
         # Calculate all quantum numbers (|P, n, J_z, E⟩)
         if sort == None:
-            P_expectations   = [expectation(sys.P,             row_to_column(sys.states[1][i][:,j])) for j in range(len(sys.states[1][0][0]))]
-            n_expectations   = [expectation(sys.a_dag @ sys.a, row_to_column(sys.states[1][i][:,j])) for j in range(len(sys.states[1][0][0]))]
-            J_z_expectations = [expectation(sys.J_z,           row_to_column(sys.states[1][i][:,j])) for j in range(len(sys.states[1][0][0]))]
+            P_expectations   = [expectation(sys.P,             row_to_column(sys.states[1][i][:,j]), single_state=True) for j in range(len(sys.states[1][0][0]))]
+            n_expectations   = [expectation(sys.a_dag @ sys.a, row_to_column(sys.states[1][i][:,j]), single_state=True) for j in range(len(sys.states[1][0][0]))]
+            J_z_expectations = [expectation(sys.J_z,           row_to_column(sys.states[1][i][:,j]), single_state=True) for j in range(len(sys.states[1][0][0]))]
             E_expectations   = states[0][i]
 
             for k in range(len(states[0][i])):
@@ -955,7 +905,7 @@ def calculate_quantum_numbers(sys, sort=None, secondary_sort=None, sort_dict={},
                 
                 # Calculate quantum number
                 else:
-                    expectations_cache = [expectation(sort_dict[sort], row_to_column(sys.states[1][i][:,j])) for j in range(len(sys.states[1][0][0]))]
+                    expectations_cache = [expectation(sort_dict[sort], row_to_column(sys.states[1][i][:,j]), single_state=True) for j in range(len(sys.states[1][0][0]))]
                     for k in range(len(sys.states[0][i])):
                         expectations_rounded.append([round(expectations_cache[k], set_precision)])
                     expectation_list.append(np.array(expectations_rounded))
@@ -967,15 +917,15 @@ def calculate_quantum_numbers(sys, sort=None, secondary_sort=None, sort_dict={},
                 if sort == 'E':
                     cache_1 = sys.states[0][i]
                 elif sort == 'P':
-                    cache_1 = [round(expectation(sort_dict[sort], row_to_column(sys.states[1][i][:,j]))) for j in range(len(sys.states[1][0][0]))]
+                    cache_1 = [round(expectation(sort_dict[sort], row_to_column(sys.states[1][i][:,j]), single_state=True)) for j in range(len(sys.states[1][0][0]))]
                 else:
-                    cache_1 = [expectation(sort_dict[sort], row_to_column(sys.states[1][i][:,j])) for j in range(len(sys.states[1][0][0]))]
+                    cache_1 = [expectation(sort_dict[sort], row_to_column(sys.states[1][i][:,j]), single_state=True) for j in range(len(sys.states[1][0][0]))]
                 
                 # Calculate second number
                 if secondary_sort == 'E':
                     cache_2 = sys.states[0][i]
                 else:
-                    cache_2 = [expectation(sort_dict[secondary_sort], row_to_column(sys.states[1][i][:,j])) for j in range(len(sys.states[1][0][0]))]
+                    cache_2 = [expectation(sort_dict[secondary_sort], row_to_column(sys.states[1][i][:,j]), single_state=True) for j in range(len(sys.states[1][0][0]))]
                 for k in range(len(sys.states[0][i])):
                     expectations_rounded.append([round(np.real(cache_1[k]), set_precision),
                                                  round(np.real(cache_2[k]), set_precision)])
@@ -1096,7 +1046,7 @@ class System:
             system_instance = pickle.load(file)
         return system_instance
 
-    def __init__(self, ω=1, ω0=1, n_max=2, N=2, ℏ=1, m=1, spin=1/2, debug=False, indiv=False):
+    def __init__(self, ω=1, ω0=1, n_max=2, N=2, ℏ=1, m=1, spin=1/2, qs=False, indiv=False):
         """ Initializes operators and parameters.
         
             Parameters
@@ -1110,7 +1060,7 @@ class System:
             m     : float; mass
             spin  : integer or half-integer; atomic spin
             
-            debug : Boolean; sets a default variable and finds states
+            qs    : Boolean; sets a default variable and finds states
             indiv : Boolean; constructs J with individual Pauli matrices, rather than collective """
     
         # Initialize parameters
@@ -1126,7 +1076,7 @@ class System:
         self.crit                   = (ω * ω0)**(1/2)
         self.J                      = N/2
         self.indiv                  = indiv
-        if indiv: self.m_J          = N**2
+        if indiv: self.m_J          = 2**N
         else:     self.m_J          = int(2*self.J + 1)
 
         # Create independent spaces
@@ -1154,7 +1104,7 @@ class System:
         del J_a_dict
 
         # Initialize things to be assigned later
-        self.vars                   = None                         # variable array
+        self.var                   = None                         # variable array
         self.states                 = None                         # selected eigenstates
         self.states_backup          = None                         # complete set of eigenstates
         self.quantum_numbers        = None                         # selected eigenvalues
@@ -1166,8 +1116,8 @@ class System:
         self.plot_list = None                                      # last plotted results
 
         # Set variable and find states
-        if debug:
-            self.Hamiltonian(np.linspace(0, self.crit, 1))
+        if qs:
+            self.Hamiltonian(np.linspace(0, 2*self.crit, 101))
             self.sort()
         else:
             self.variable()
@@ -1181,19 +1131,21 @@ class System:
         samples   = int(input(f"{'number of trials':<35}: "))
         
         modifiers = [item.strip() for item in input(f"{'modifiers (csv)':<35}: ").split(',')]
+        if modifiers[0] == '': modifiers = 'Dicke'
         
         self.Hamiltonian(np.linspace(lower*self.crit, upper*self.crit, samples), modifiers)
         self.sort()
 
-    def Hamiltonian(self, vars, modifiers='Dicke'):
+    def Hamiltonian(self, var, modifiers='Dicke'):
         """ Creates a Hamiltonian for each variable in the set, then finds eigenstates.
         
             Parameters
             ----------
-            vars : 1D array; see calculate_states() for more details """
+            var       : 1D array; see calculate_states() for more details
+            modifiers : list of strings; may include 'Dicke' or 'Ising', but not both """
 
         # Standard Dicke
-        if 'Dicke' or 'None' in modifiers:
+        if 'Dicke' in modifiers:
             H_field = self.ℏ * self.ω  * (self.a_dag @ self.a)
             H_atom  = self.ℏ * self.ω0 * self.J_z
             H_int   = self.ℏ / np.sqrt(self.N) * (self.a + self.a_dag) @ self.J_x
@@ -1201,20 +1153,31 @@ class System:
         
         # Dicke + Ising
         elif 'Ising' in modifiers:
+            if self.indiv:
+                H_Ising = np.zeros_like(self.J_z)
+                for i in range(self.N):
+                    for j in range(self.N):
+                        if (j == i-1) or (j == i+1):
+                            H_Ising += self.J_z_list[i] @ self.J_z_list[j]
+                H_Ising = self.ℏ * self.ω0 * H_Ising
+            else:
+                H_Ising = self.ℏ * self.ω0 * self.J_z @ self.J_z
             H_field = self.ℏ * self.ω  * (self.a_dag @ self.a)
             H_atom  = self.ℏ * self.ω0 * self.J_z
-            H_Ising = self.ℏ * self.ω0 * self.J_z @ self.J_z
             H_int   = self.ℏ / np.sqrt(self.N) * (self.a + self.a_dag) @ self.J_x
             H       = lambda λ: H_field + H_atom + H_Ising + λ*H_int
         
+        else:
+            print("Try a different modifier.")
+        
         # Calculate Hamiltonian
         H_list = []
-        for i in range(len(vars)):
-            H_list.append(H(vars[i]))
+        for i in range(len(var)):
+            H_list.append(H(var[i]))
         del H_field, H_atom, H_int, H
         
         # Assign results to the system
-        self.vars   = vars
+        self.var   = var
         self.H      = np.array(H_list)
         self.states = calculate_states(self)
 
@@ -1262,13 +1225,88 @@ class System:
         self.select('restore')
 
     def plot(self, selection='spectrum'):
-        """ Just a convenient shorthand for plotting; see plot_data for more details. """        
-        plot_data(self, selection)
+        """ Generates data to be sent to plot_handling(). """        
+    
+        self.print('parameters')
+        self.print('numbers')
+    
+        # Calculate selection
+        if selection == 'spectrum':
+            plot_list = find_spectrum(self)
+            
+        elif selection == 'occupation':
+            plot_list = find_occupation(self)
+            
+        elif selection == 'squeezing':
+            ΔJ_x      = uncertainty(self.J_x, self.states)
+            ΔJ_y      = uncertainty(self.J_y, self.states)
+            ΔJ_z      = uncertainty(self.J_z, self.states)
+            J_x_exp   = expectation(self.J_x, self.states)
+            J_x_exp   = tolerance_check(J_x_exp)
+            J_y_exp   = expectation(self.J_y, self.states)
+            J_z_exp   = expectation(self.J_z, self.states)
+            product_1 = ΔJ_x * ΔJ_y
+            product_2 = ΔJ_y * ΔJ_z
+            product_3 = ΔJ_x * ΔJ_z
+            ζ         = find_squeezing(self)
+            plot_list = [[(f"", f"$ζ^2$"),      (self.var, ζ),         (0, 1), ('plot')],
+                         [(f"", f"$⟨J_x⟩$"),     (self.var, J_x_exp),   (1, 0), ('plot')],
+                         [(f"", f"$⟨J_y⟩$"),     (self.var, J_y_exp),   (1, 1), ('plot')],
+                         [(f"", f"$⟨J_z⟩$"),     (self.var, J_z_exp),   (1, 2), ('plot')],
+                         [(f"", f"$ΔJ_x$"),     (self.var, ΔJ_x),      (2, 0), ('plot')],
+                         [(f"", f"$ΔJ_y$"),     (self.var, ΔJ_y),      (2, 1), ('plot')],
+                         [(f"", f"$ΔJ_z$"),     (self.var, ΔJ_z),      (2, 2), ('plot')],
+                         [(f"", f"$ΔJ_xΔJ_y$"), (self.var, product_1), (3, 0), ('plot')],
+                         [(f"", f"$ΔJ_yΔJ_z$"), (self.var, product_2), (3, 1), ('plot')],
+                         [(f"", f"$ΔJ_xΔJ_z$"), (self.var, product_3), (3, 2), ('plot')]]
+        
+        elif selection == 'entropy':
+            plot_list = find_entropy(self)
+        
+        elif selection == 'all':
+            plot_list_E       = find_spectrum(self)
+            plot_list_E.append([(f"λ", f"$ζ^2$"), (self.var, find_squeezing(self)), (0, 1), ('plot')])
+            plot_list_n_J     = find_occupation(self)
+            plot_list_entropy = find_entropy(self)
+            
+            self.plot_lists = [[plot_list_E, plot_list_n_J, plot_list_entropy], self.quantum_numbers]
+            
+            plot_handling(plot_list_E,       self.quantum_numbers, no_show=True)
+            plot_handling(plot_list_n_J,     self.quantum_numbers, no_show=True)
+            plot_handling(plot_list_entropy, self.quantum_numbers, no_show=True)
+            plt.show()
+        
+        elif selection == 'last':
+            for i in range(len(self.plot_lists[0])):
+                plot_handling(self.plot_lists[0][i], self.plot_lists[1], no_show=True)
+            plt.show()
+        
+        elif selection == 'spins':
+            if self.J_z_list is not None:
+                plot_list = [[(f"$λ$", f"$⟨J_z⟩$"), (self.var, expectation(self.J_z, self.states)), (0, 0), ('plot')]]
+                J_z_cache = []
+                for i in range(self.N):
+                    plot_list.append([(f"$λ$", f"$⟨J_{i+1}⟩$"), (self.var, expectation(self.J_z_list[i], self.states)), (1, i), ('plot')])
+            else:
+                print("Individual spins can be monitored by creating System(args*, indiv=True).")
+                return
+        
+        else:
+            print('Try a different keyword.')
+
+        # Plot calculated values
+        if selection not in ['all', 'last']:
+            
+            # Save for later
+            self.plot_lists = [[plot_list], self.quantum_numbers]
+            
+            # Plot
+            plot_handling(plot_list, self.quantum_numbers)
 
     def update(self):
         """ Run this every time a parameter is changed. """
         self.__init__(self.ω, self.ω0, self.n_max, self.N, self.ℏ, self.m, self.spin)
-        self.Hamiltonian(self.vars)
+        self.Hamiltonian(self.var)
         self.sort('P', 'E')
     
     def save(self, filename='cache'):
@@ -1372,17 +1410,17 @@ def Chebyshift(sys):
             for t in times:
             
                 # Compute the time-evolved state at time t
-                state_evolved = chebyshev_time_evolution(sys.H(sys.vars[i]), state, t, num_terms)
+                state_evolved = chebyshev_time_evolution(sys.H(sys.var[i]), state, t, num_terms)
                 state_evolved = state_evolved / np.linalg.norm(state_evolved)
                 
                 # Calculate a property of the evolved state (e.g., probability |state_evolved|^2)
-                measure = expectation(sys.H(sys.vars[i]), state_evolved, single_state=True)
+                measure = expectation(sys.H(sys.var[i]), state_evolved, single_state=True)
                 
                 # Store the total measure at this time step (or any other property of interest)
                 expectation_values[j].append(measure)
 
         expectation_values = np.array(expectation_values).T
-        plot_list.append([(f"$t,\tλ={round(sys.vars[i],2)}$", f"$⟨E⟩$"), 
+        plot_list.append([(f"$t,\tλ={round(sys.var[i],2)}$", f"$⟨E⟩$"), 
                           (times, expectation_values), 
                           (0, i), 
                           ('plot')])
@@ -1402,7 +1440,7 @@ def Lindbladian(sys):
     plot_list = []
 
     # Sort through each λ
-    for i in tqdm(range(len(sys.vars)), desc=f"{'calculating Lindbladian':<35}"):
+    for i in tqdm(range(len(sys.var)), desc=f"{'calculating Lindbladian':<35}"):
 
         # Initialize data container for plotting
         expectation_values = []
@@ -1425,14 +1463,14 @@ def Lindbladian(sys):
                 expectation_values[j].append(np.real(np.trace(sys.J_z @ ρ)))
 
                 # Construct the Lindbladian and evolve the density matrix
-                dρ = -1j * (sys.H(sys.vars[i]) @ ρ - ρ @ sys.H(sys.vars[i]))
+                dρ = -1j * (sys.H(sys.var[i]) @ ρ - ρ @ sys.H(sys.var[i]))
                 for M in L:
                     anticommutator = (M.conj().T @ M) @ ρ + ρ @ (M.conj().T @ M)
                     dρ += M @ (ρ @ M.conj().T) - (1/2) * anticommutator
                 ρ = ρ + dt * dρ
                 
         expectation_values = np.array(expectation_values).T
-        plot_list.append([(f"$t, λ={round(sys.vars[i],2)}$", f"$⟨J_z⟩$"), 
+        plot_list.append([(f"$t, λ={round(sys.var[i],2)}$", f"$⟨J_z⟩$"), 
                           (times, expectation_values), 
                           (0, i), 
                           ('plot')])
@@ -1499,33 +1537,33 @@ def SEOP_Dicke_model():
     H       = lambda λ: H_field + H_I + H_S + H_spin + λ*H_int
 
     # Generate all eigenstates and eigenvalues
-    vars = np.linspace(0, 10*λ_critical, 101)
-    states       = calculate_states(vars)
+    var = np.linspace(0, 10*λ_critical, 101)
+    states       = calculate_states(var)
 
     # Sort eigenstates and eigenvalues
     sort_dict = {'P': P, 'E': H, 'S_z': S_z}
     states, quantum_numbers = sort_by_quantum_numbers(states, sort='P', secondary_sort='E')
 
     # Define custom plotting
-    def SEOP_occupation(vars, states, quantum_numbers):
+    def SEOP_occupation(var, states, quantum_numbers):
     
         # Select specific eigenstates
         selected_states = [0, int(len(states[0][0])/2)]
         states          = [states[0][:,selected_states], states[1][:,:,selected_states]]
         quantum_numbers = quantum_numbers[:,selected_states]
     
-        n_expectations   = expectation(a_dag@a, states, single_state=False)
-        J_x_expectations = expectation(I_z,     states, single_state=False)
-        J_z_expectations = expectation(S_z,     states, single_state=False)
+        n_expectations   = expectation(a_dag@a, states)
+        J_x_expectations = expectation(I_z,     states)
+        J_z_expectations = expectation(S_z,     states)
         
-        plot_list = [[(f"$λ$", f"$⟨n⟩$"),   (vars, n_expectations),   (0, 1), ('plot')],
-                     [(f"$λ$", f"$⟨I_z⟩$"), (vars, J_x_expectations), (1, 0), ('plot')],
-                     [(f"$λ$", f"$⟨J_z⟩$"), (vars, J_z_expectations), (1, 2), ('plot')]]
+        plot_list = [[(f"$λ$", f"$⟨n⟩$"),   (var, n_expectations),   (0, 1), ('plot')],
+                     [(f"$λ$", f"$⟨I_z⟩$"), (var, J_x_expectations), (1, 0), ('plot')],
+                     [(f"$λ$", f"$⟨J_z⟩$"), (var, J_z_expectations), (1, 2), ('plot')]]
         return plot_list
     
     # Make a calculation
-    spectrum_plot_list   = find_spectrum(vars, states, quantum_numbers)
-    occupation_plot_list = SEOP_occupation(vars, states, quantum_numbers)
+    spectrum_plot_list   = find_spectrum(var, states, quantum_numbers)
+    occupation_plot_list = SEOP_occupation(var, states, quantum_numbers)
     plot_handling(spectrum_plot_list,   quantum_numbers)
     plot_handling(occupation_plot_list, quantum_numbers)
 
@@ -1588,33 +1626,33 @@ def two_spin_Dicke_model():
     H       = lambda λ: H_field + H_spin + λ*H_int
 
     # Generate all eigenstates and eigenvalues
-    vars = np.linspace(0, 5*λ_critical, 101)
-    states       = calculate_states(vars)
+    var = np.linspace(0, 5*λ_critical, 101)
+    states       = calculate_states(var)
 
     # Sort eigenstates and eigenvalues
     sort_dict = {'P': P, 'E': H, 'S_z': S_z, 'n': a_dag@a}
     states, quantum_numbers = sort_by_quantum_numbers(states, sort='P', secondary_sort='E')
 
     # Define custom plotting
-    def plot_n_S(vars, states, quantum_numbers):
+    def plot_n_S(var, states, quantum_numbers):
     
         # Select specific eigenstates
         selected_states = [0, int(len(states[0][0])/2)]
         states          = [states[0][:,selected_states], states[1][:,:,selected_states]]
         quantum_numbers = quantum_numbers[:,selected_states]
     
-        n_expectations   = expectation(a_dag@a, states, single_state=False)
-        J_x_expectations = expectation(I_z,     states, single_state=False)
-        J_z_expectations = expectation(S_z,     states, single_state=False)
+        n_expectations   = expectation(a_dag@a, states)
+        J_x_expectations = expectation(I_z,     states)
+        J_z_expectations = expectation(S_z,     states)
         
-        plot_handling([[(f"$λ$", f"$⟨n⟩$"),   (vars, n_expectations),   (0, 1), ('plot')],
-                      [(f"$λ$", f"$⟨I_z⟩$"), (vars, J_x_expectations), (1, 0), ('plot')],
-                      [(f"$λ$", f"$⟨J_z⟩$"), (vars, J_z_expectations), (1, 2), ('plot')]],
+        plot_handling([[(f"$λ$", f"$⟨n⟩$"),   (var, n_expectations),   (0, 1), ('plot')],
+                      [(f"$λ$", f"$⟨I_z⟩$"), (var, J_x_expectations), (1, 0), ('plot')],
+                      [(f"$λ$", f"$⟨J_z⟩$"), (var, J_z_expectations), (1, 2), ('plot')]],
                       quantum_numbers = quantum_numbers)
     
     # Make a calculation
-    #find_spectrum(vars, states, quantum_numbers)
-    plot_n_S(vars, states, quantum_numbers)
+    #find_spectrum(var, states, quantum_numbers)
+    plot_n_S(var, states, quantum_numbers)
 
 ########################################################################################################################################################
 # Main
