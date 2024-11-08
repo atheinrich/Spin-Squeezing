@@ -215,7 +215,7 @@ def create_a_operators(sys):
         a[i-1, i] = np.sqrt(i)
     a_dag = a.conj().T
     return {'a': a, 'a_dag': a_dag}
-    
+
 def create_parity_operator(sys):
     """ Generate parity operator that commutes with the standard Dicke model. """
     
@@ -307,16 +307,16 @@ def uncertainty(operator, states, sys=None):
 
     # Initialize data containers
     expectations, output = [[], []], []
-    
+
     # Calculate expectation values
-    expectations[0] = (operator, states)
+    expectations[0] = expectation(operator,            states)
     expectations[1] = expectation(operator @ operator, states)
-    
+
     # Use expectation values to calculate uncertainty
-    for i in range(len(expectations[0])):
+    for i in range(states[1].shape[0]):
         cache = []
-        for j in range(len(list(expectations[0][i]))):
-            cache.append(np.sqrt(abs(list(expectations[1])[i][j]-list(expectations[0])[i][j]**2)))
+        for j in range(states[1].shape[2]):
+            cache.append(np.sqrt(abs(expectations[1][i][j]-expectations[0][i][j]**2)))
         output.append(cache)
     
     if sys:
@@ -385,6 +385,83 @@ def partial_transpose(ρ, dim_A, dim_B, subsystem):
     #    print("The state is separable.")
     
     return eigensum
+
+def Chebyshift(sys):
+    from scipy.special import jv  # Bessel function of the first kind
+    from scipy.sparse import identity, csr_matrix
+    from scipy.sparse.linalg import eigs, LinearOperator
+    
+    def chebyshev_time_evolution(H, input_state, t, num_terms, i):
+    
+        # Estimate the max and min eigenvalues of H
+        E_min, E_max = sys.states_backup[0][i].max().real, sys.states_backup[0][i].min().real
+        
+        psi_cache = np.zeros_like(input_state, dtype=np.complex128)
+        input_state = psi_cache + input_state
+
+        # Scale the Hamiltonian
+        H_scaled = (2 * H - (E_max + E_min) * csr_matrix(identity(H.shape[0]))) / (E_max - E_min)
+
+        # Initial Chebyshev polynomials
+        T0 = input_state
+        T1 = H_scaled @ input_state
+        
+        # Time evolution result (initialized with the first term)
+        output_state = jv(0, t * (E_max - E_min) / 2) * T0
+        
+        # Iteratively compute higher-order terms
+        for i in range(1, num_terms):
+        
+            Tn = np.zeros(T0.shape[0], dtype=np.complex128).reshape((input_state.shape[0], 1))
+            Tn += 2 * (H_scaled @ T1) - T0
+
+            # Add the contribution of the nth term
+            output_state += (2 * (-1j)**i * jv(i, t * (E_max - E_min) / 2)) * Tn
+            
+            # Update for the next iteration
+            T0, T1 = T1, Tn
+        
+        return output_state
+    
+    # Set time parameters
+    times = sys.variable()
+
+    # Set iteration length
+    num_terms = 10
+
+    # Initialize data container
+    plot_list = []
+
+    # Cycle through trials
+    for i in tqdm(range(len(sys.states[1])), desc=f"{'calculating evolution':<35}"):
+        expectation_values = []
+        
+        # Cycle through states
+        for j in range(sys.states[1][i].shape[1]):
+            expectation_values.append([])
+
+            # Extract column vector
+            state = row_to_column(sys.states[1][i][:,j])
+            
+            # Evolve state
+            for t in times:
+            
+                # Compute the time-evolved state at time t
+                state_evolved = chebyshev_time_evolution(sys.H[i], state, t, num_terms, i)
+                state_evolved = state_evolved / np.linalg.norm(state_evolved)
+                
+                # Calculate a property of the evolved state (e.g., probability |state_evolved|^2)
+                measure = expectation(sys.H[i], state_evolved, single_state=True)
+                
+                # Store the total measure at this time step (or any other property of interest)
+                expectation_values[j].append(measure)
+
+        expectation_values = np.array(expectation_values).T
+        plot_list.append([(f"$t,\tλ={round(sys.var[i],2)}$", f"$⟨E⟩$"), 
+                          (times, expectation_values), 
+                          (0, i), 
+                          ('plot')])
+    return plot_list
 
 ########################################################################################################################################################
 # Algorithms
@@ -496,7 +573,7 @@ def examples(specific_example):
         Parameters
         ----------
         specific_example    : nonnegative integer
-           0 (Tutorial 0)   : the most basic options
+           0 (Tutorial 0)   : initialization and plotting
            1 (Tutorial 1)   : custom parameters and variables
            2 (Tutorial 2)   : custom state selection
            3 (Tutorial 3)   : putting it all together
@@ -507,7 +584,7 @@ def examples(specific_example):
     if specific_example == 0:
     
         # Initialize model and generate eigenstates
-        sys = System(qs=True)
+        sys = System(var_set='standard')
 
         # Sort eigenstates and eigenvalues
         sys.sort()
@@ -526,8 +603,7 @@ def examples(specific_example):
         atomic_frequency      = 1
         number_of_field_modes = 48
         number_of_atoms       = 4
-        sys                   = System(field_frequency, atomic_frequency,
-                                       number_of_field_modes, number_of_atoms)
+        sys = System(field_frequency, atomic_frequency, number_of_field_modes, number_of_atoms)
 
         # Generate eigenstates and eigenvalues
         var = np.linspace(1e-10, sys.crit, 101)
@@ -569,7 +645,7 @@ def examples(specific_example):
         # Initialize model
         sys = System(0.1, 10, 48, 4)
 
-        # Generate all eigenstates and eigenvalues
+        # Omit this in the command line
         sys.Hamiltonian(np.linspace(1e-10, 3*sys.crit, 101))
 
         # Sort eigenstates and eigenvalues
@@ -578,39 +654,48 @@ def examples(specific_example):
         # Select specific eigenstates
         sys.select([0, 1, 2])
         
-        # View parameters
-        sys.print()
-        
         # Make a calculation
         sys.plot('squeezing')
         
         # Return for use in command line
         return sys
 
-    # Entropy
+    # Various plots
     elif specific_example == 4:
     
-        # Initialize model
-        sys = System(0.1, 10, 48, 4)
-
-        # Generate all eigenstates and eigenvalues
-        sys.Hamiltonian(np.linspace(0, 6*sys.crit, 101))
-
-        # Sort eigenstates and eigenvalues
-        sys.sort('P', 'E')
-
-        # Select specific eigenstates
-        sys.select([0, 1 ,2])
+        sys = System(1, 1, 4, 4, var_set='standard')
+        sys.select([[0], [0]])
         
-        # View parameters
-        sys.print()
-        
-        # Make a calculation
+        sys.plot('spectrum')
+        sys.plot('occupation')
         sys.plot('entropy')
+        sys.plot('squeezing')
         
-        # Return for use in command line
-        return sys
+        sys.select('super')
+        sys.plot('all')
+        sys.plot('Chebyshift')
+    
+    # Individual spins
+    elif specific_example == 5:
+        
+        sys = System(1, 1, 4, 4, var_set='standard', indiv=True)
+        sys.select([0, 1])
+        sys.plot('spins')
 
+    # Ising model
+    elif specific_example == 6:
+    
+        sys = System(1, 1, 4, 4, var_set='standard', indiv=True, mod='Ising')
+        sys.select([0, 1])
+        sys.plot('spins')
+    
+    # Ising + Dicke model
+    elif specific_example == 6:
+    
+        sys = System(1, 1, 4, 4, var_set='standard', mod='Ising+')
+        sys.select([0, 1])
+        sys.plot()
+    
     # Development: bifurcations
     elif specific_example == 5:
     
@@ -635,11 +720,11 @@ def examples(specific_example):
         states       = calculate_states(var)
 
         # Sort eigenstates and eigenvalues
-        states, quantum_numbers = sort_by_quantum_numbers(states, sort='P', secondary_sort='E')
+        states, numbers = sort_by_quantum_numbers(states, sort='P', secondary_sort='E')
 
         # Make a calculation
         plot_list = find_spectrum(var, states)
-        plot_handling(plot_list, quantum_numbers)
+        plot_handling(plot_list, numbers)
     
     # Development: Chebyshev evolution
     elif specific_example == 6:
@@ -654,18 +739,18 @@ def examples(specific_example):
         init_Dicke_model(n_max, N)
 
         # Generate eigenstates and eigenvalues
-        var = np.linspace(1e-10, 2*λ_critical, 11)
-        states       = calculate_states(var)
+        var    = np.linspace(1e-10, 2*λ_critical, 11)
+        states = calculate_states(var)
 
         # Sort eigenstates and eigenvalues
-        states, quantum_numbers = sort_by_quantum_numbers(states, sort='P', secondary_sort='E')
+        states, numbers = sort_by_quantum_numbers(states, sort='P', secondary_sort='E')
 
         # Select specific eigenstates
-        states, quantum_numbers = select_states(var, states, quantum_numbers, selection="random")
+        states, numbers = select_states(var, states, numbers, selection="random")
 
         # Make a calculation
         plot_list = Chebyshift(var, states)
-        plot_handling(plot_list, quantum_numbers, plot_mode="3D")
+        plot_handling(plot_list, numbers, plot_mode="3D")
 
     # Development: Lindbladian evolution
     elif specific_example == 7:
@@ -684,14 +769,14 @@ def examples(specific_example):
         states       = calculate_states(var)
 
         # Sort eigenstates and eigenvalues
-        states, quantum_numbers = sort_by_quantum_numbers(states, sort='P', secondary_sort='E')
+        states, numbers = sort_by_quantum_numbers(states, sort='P', secondary_sort='E')
 
         # Select specific eigenstates
-        states, quantum_numbers = select_states(var, states, quantum_numbers, selection="ground")
+        states, numbers = select_states(var, states, numbers, selection="ground")
 
         # Make a calculation
         plot_list = Lindbladian(var, states)
-        plot_handling(plot_list, quantum_numbers, plot_mode="3D")
+        plot_handling(plot_list, numbers, plot_mode="3D")
 
     # Development: SEOP
     elif specific_example == 8:
@@ -721,18 +806,20 @@ def select_states(sys, selection='ground'):
     
         Parameters
         ----------
-        var            : 1D array; typically a range of coupling strengths
+        var             : 1D array; typically a range of coupling strengths
         states          : 3D array; standard representation
-        quantum_numbers : 3D array; standard representation
+        numbers         : 3D array; standard representation
         selection       : list or string
-            list        : [[<index for each state by sorted eigenvalue>], [<the same but for the other parity>]]
-            strings     : "ground" yields the ground state for each parity
-                          "random" yields a single state as a weighted superposition of eigenstates
+            list        : list of indices like [0,1,4] corresponding to sorted eigenvalues
+                          list of list of indices like [[0,1],[0,1]] corresponding to even and odd parity
+            strings     : 'ground' yields the ground state for each parity
+                          'random' yields a single state as a weighted superposition of eigenstates
+                          'super' yields a superposition of the current states
      
         Returns
         -------
         states          : 3D array; standard representation
-        quantum_numbers : 3D array; standard representation """
+        numbers         : 3D array; standard representation """
     
     # Manual state selection
     if type(selection) == list:
@@ -747,9 +834,10 @@ def select_states(sys, selection='ground'):
             selection = selection_cache
         
         # Update and return states
-        states          = [sys.states[0][:, selection], sys.states[1][:, :, selection]]
-        quantum_numbers = sys.quantum_numbers[:, selection]
-        return states, quantum_numbers
+        states  = [sys.states[0][:, selection], sys.states[1][:, :, selection]]
+        numbers = sys.numbers[:, selection]
+        
+        return states, numbers
     
     # Ground states
     elif selection == 'ground':
@@ -758,9 +846,9 @@ def select_states(sys, selection='ground'):
         selected_states = [0, int(len(sys.states[0][0])/2)]
         
         # Update and return states
-        states          = [sys.states[0][:,selected_states], sys.states[1][:,:,selected_states]]
-        quantum_numbers = sys.quantum_numbers[:,selected_states]
-        return states, quantum_numbers
+        states  = [sys.states[0][:,selected_states], sys.states[1][:,:,selected_states]]
+        numbers = sys.numbers[:,selected_states]
+        return states, numbers
     
     # Random state
     elif selection == 'random':
@@ -769,14 +857,14 @@ def select_states(sys, selection='ground'):
         new_states = [[], []]
         
         # Initialize randomization
-        seed               = 1
+        seed               = np.random.randint(100) # 1
         rng                = np.random.default_rng(seed)
         
         # Choose how many eigenstates to include
-        num_eigenstates    = rng.integers(low=1, high=states[0][0].shape[0])
+        num_eigenstates    = rng.integers(low=1, high=sys.states[0][0].shape[0])
         
         # Choose random eigenstates and weights for each eigenstate
-        random_eigenstates = rng.integers(low=0, high=states[0][0].shape[0], size=num_eigenstates)
+        random_eigenstates = rng.integers(low=0, high=sys.states[0][0].shape[0], size=num_eigenstates)
         random_weights     = rng.uniform(0, 1, num_eigenstates)
         
         # Sort through trials
@@ -786,17 +874,29 @@ def select_states(sys, selection='ground'):
             new_state = np.zeros_like(sys.states[1][0][:,0])
             for j in range(num_eigenstates):
                 new_state += random_weights[j] * sys.states[1][i][:,random_eigenstates[j]]
-            
+
             # Normalize and recast as column vector
-            new_state = (new_state / row_to_column(np.linalg.norm(new_state)))
-            
+            new_state = row_to_column(new_state / np.linalg.norm(new_state))
+
             # Calculate energy
-            new_energy = expectation(sys.H(sys.var[i]), new_state)
-            
+            new_energy = expectation(sys.H[i], new_state, single_state=True)
+
             # Append to data container
             new_states[0].append([new_energy])
             new_states[1].append(new_state)
+
+        new_states = [np.array(new_states[0]), np.array(new_states[1])]
+        return new_states, None
         
+    elif selection == 'super':
+        new_states = [[], []]
+        for i in range(sys.states[1].shape[0]):
+            new_states[0].append([0])
+            new_states[1].append(np.zeros_like(sys.states[1][0][:,0]))
+            for j in range(sys.states[1].shape[2]):
+                new_states[0][-1] += sys.states[0][i][j]
+                new_states[1][-1] += sys.states[1][i][:,j]
+            new_states[1][-1] = row_to_column(new_states[1][-1] / np.linalg.norm(new_states[1][-1]))
         new_states = [np.array(new_states[0]), np.array(new_states[1])]
         return new_states, None
 
@@ -933,23 +1033,24 @@ def calculate_quantum_numbers(sys, sort=None, secondary_sort=None, sort_dict={},
     
     return np.array(expectation_list)
 
-def plot_handling(results, quantum_numbers=None, plot_mode='2D', no_show=False):
+def plot_handling(results, numbers=None, plot_mode='2D', no_show=False, sys=None):
     """ Initializes matplotlib and generates plots from input data.
         
         Parameters
         ----------
-        results         : list of lists; [[titles_1, values_1, indices_1, style_1],
-                                          [titles_2, values_2, indices_2, style_2], ...]
-        quantum_numbers : 3D array; corresponding quantum numbers for coloring plots
-        plot_mode       : string in {'2D', '3D'}; self-explanatory
-        no_show         : Boolean; omits plt.show() if True
+        results   : list of lists; [[titles_1, values_1, indices_1, style_1],
+                                    [titles_2, values_2, indices_2, style_2], ...]
+        numbers   : 3D array; corresponding quantum numbers for coloring plots
+        plot_mode : string in {'2D', '3D'}; self-explanatory
+        no_show   : Boolean; omits plt.show() if True
+        sys       : optional inclusion of System object
       
         Details
         -------
-        titles  : (row_title, column_title); ex. ('x', 'f(x)')
-        values  : (x_values,  y_values);     ex. (x_array, y_array)
-        indices : (row_index, column_index); ex. (0, 2)
-        style   : (plot_type);               ex. ('plot') or ('contour') """
+        titles    : (row_title, column_title); ex. ('x', 'f(x)')
+        values    : (x_values,  y_values);     ex. (x_array, y_array)
+        indices   : (row_index, column_index); ex. (0, 2)
+        style     : (plot_type);               ex. ('plot') or ('contour') """
     
     # 2D plotting
     if plot_mode == '2D':
@@ -982,9 +1083,9 @@ def plot_handling(results, quantum_numbers=None, plot_mode='2D', no_show=False):
             ax.set_ylabel(labels[1], fontsize=16)
             ax.ticklabel_format(useOffset=False)
 
-            if quantum_numbers is not None:
+            if numbers is not None:
                 for i in range(len(values[1][0])):
-                    color_category = color_map.get(int(quantum_numbers[0][i][0]))
+                    color_category = color_map.get(int(numbers[0][i][0]))
                     set_color = get_colormap_color(color_category, i+1, len(values[1][0]))
 
                     if style == 'plot':
@@ -1007,13 +1108,14 @@ def plot_handling(results, quantum_numbers=None, plot_mode='2D', no_show=False):
 
         for i, (labels, values, indices, style) in enumerate(results):
             x = values[0]
-            y = np.full_like(values[1], i)
+            y = np.full_like(values[1], sys.var[i])
             z = values[1]
 
             for trial in range(z.shape[1]):
                 ax.plot(x, y[:, trial], z[:, trial])
 
         ax.set_xlabel(f"$t$", fontsize=12)
+        ax.set_ylabel(f"$λ$", fontsize=12)
         ax.set_zlabel(labels[1], fontsize=12)
         if not no_show: plt.show()
 
@@ -1035,124 +1137,122 @@ class System:
 
     @classmethod
     def load(cls, filename='cache'):
-        """ Load states with sys=System.load(filename).
-            If a system is already initialized, use sys=sys.load(filename). 
+        """ Loads states.
+            Use sys=System.load(filename) at start or sys=sys.load(filename) for existing system.
             
             Parameters
             ----------
-            filename : string, such as 'data' """
+            filename : str """
     
         with open('Dicke_' + filename + '.pkl', 'rb') as file:
             system_instance = pickle.load(file)
         return system_instance
 
-    def __init__(self, ω=1, ω0=1, n_max=2, N=2, ℏ=1, m=1, spin=1/2, qs=False, indiv=False):
+    def __init__(self, ω=1, ω0=1, n_max=2, N=1, ℏ=1, m=1, spin=1/2, var_set='custom', indiv=False, mod='Dicke'):
         """ Initializes operators and parameters.
         
             Parameters
             ----------
-            ω     : float; field frequency
-            ω0    : float; atomic frequency
-            n_max : integer; number of field modes
-            N     : integer; number of particles
+            ω       : float                                  : field frequency
+            ω0      : float                                  : atomic frequency
+            n_max   : int                                    : number of field modes
+            N       : int                                    : number of particles
             
-            ℏ     : float; Planck's constant
-            m     : float; mass
-            spin  : integer or half-integer; atomic spin
+            ℏ       : float                                  : Planck's constant
+            m       : float                                  : mass
+            spin    : int or half-int                        : atomic spin
             
-            qs    : Boolean; sets a default variable and finds states
-            indiv : Boolean; constructs J with individual Pauli matrices, rather than collective """
+            var_set : str in ['custom', 'standard', 'debug'] : custom or preset variable
+            indiv   : bool                                   : individual Pauli matrices, rather than collective spin
+            mod     : str in ['Dicke', 'Ising', 'Ising+']    : preset Hamiltonian """
+        
+        # Set Hamiltonian
+        self.mod            = mod
     
         # Initialize parameters
-        self.ω                      = ω
-        self.ω0                     = ω0
-        self.n_max                  = n_max
-        self.N                      = N
+        self.ω              = ω
+        self.ω0             = ω0
+        self.n_max          = n_max
+        self.N              = N
         
-        self.ℏ                      = ℏ
-        self.m                      = m
-        self.spin                   = spin
+        self.ℏ              = ℏ
+        self.m              = m
+        self.spin           = spin
         
-        self.crit                   = (ω * ω0)**(1/2)
-        self.J                      = N/2
-        self.indiv                  = indiv
-        if indiv: self.m_J          = 2**N
-        else:     self.m_J          = int(2*self.J + 1)
+        self.crit           = (ω * ω0)**(1/2)
+        self.J              = N/2
+        self.indiv          = indiv
+        if indiv: self.m_J  = 2**N
+        else:     self.m_J  = int(2*self.J + 1)
 
-        # Create independent spaces
-        J_spin_dict                 = create_J_operators(self, individual=self.indiv)
-        a_field_dict                = create_a_operators(self)
-        self.J_x_spin               = J_spin_dict['J_x']
-        self.J_y_spin               = J_spin_dict['J_y']
-        self.J_z_spin               = J_spin_dict['J_z']
-        self.J_m_spin               = J_spin_dict['J_m']
-        self.J_p_spin               = J_spin_dict['J_p']
-        self.a_field                = a_field_dict['a']
-        self.a_dag_field            = a_field_dict['a_dag']
+        # Initialize things to be assigned later
+        self.states         = None                         # selected eigenstates
+        self.states_backup  = None                         # complete set of eigenstates
+        self.numbers        = None                         # selected eigenvalues
+        self.numbers_backup = None                         # complete set of eigenvalues
+        self.time           = None                         # time array
+        self.plot_lists     = None                         # last plotted results
+        self.desc           = None                         # short description for saved files
+
+        # Operators in independent spaces
+        J_spin_dict         = create_J_operators(self, individual=self.indiv)
+        a_field_dict        = create_a_operators(self)
+        self.J_x_spin       = J_spin_dict['J_x']
+        self.J_y_spin       = J_spin_dict['J_y']
+        self.J_z_spin       = J_spin_dict['J_z']
+        self.J_m_spin       = J_spin_dict['J_m']
+        self.J_p_spin       = J_spin_dict['J_p']
+        #self.J2_spin        = (self.J_x_spin @ self.J_x_spin) + (self.J_y_spin @ self.J_y_spin) + (self.J_z_spin + self.J_z_spin)
+        self.a_field        = a_field_dict['a']
+        self.a_dag_field    = a_field_dict['a_dag']
         del J_spin_dict, a_field_dict
         
         # Create tensor product spaces
         J_a_dict = compute_tensor_products(self)
-        self.J_x                    = J_a_dict['J_x']              # spin x operator
-        self.J_y                    = J_a_dict['J_y']              # spin y operator
-        self.J_z                    = J_a_dict['J_z']              # spin z operator
-        self.J_m                    = J_a_dict['J_m']              # spin annihilation operator
-        self.J_p                    = J_a_dict['J_p']              # spin creation operator
-        self.a                      = J_a_dict['a']                # field annihilation operator
-        self.a_dag                  = J_a_dict['a_dag']            # field creation operator
-        self.P                      = create_parity_operator(self) # parity operator
+        self.J_x            = J_a_dict['J_x']              # spin x operator
+        self.J_y            = J_a_dict['J_y']              # spin y operator
+        self.J_z            = J_a_dict['J_z']              # spin z operator
+        self.J_m            = J_a_dict['J_m']              # spin annihilation operator
+        self.J_p            = J_a_dict['J_p']              # spin creation operator
+        self.a              = J_a_dict['a']                # field annihilation operator
+        self.a_dag          = J_a_dict['a_dag']            # field creation operator
+        self.P              = create_parity_operator(self) # parity operator
         del J_a_dict
-
-        # Initialize things to be assigned later
-        self.var                   = None                         # variable array
-        self.states                 = None                         # selected eigenstates
-        self.states_backup          = None                         # complete set of eigenstates
-        self.quantum_numbers        = None                         # selected eigenvalues
-        self.quantum_numbers_backup = None                         # complete set of eigenvalues
-        self.H                      = None                         # Hamiltonian
-        self.desc                   = None                         # short description for saved files
         
-        # Cache/other
-        self.plot_list = None                                      # last plotted results
-
         # Set variable and find states
-        if qs:
-            self.Hamiltonian(np.linspace(0, 2*self.crit, 101))
-            self.sort()
-        else:
-            self.variable()
-
-    def variable(self):
-        """ Creates a variable and the associated Hamiltonians.
-            See Hamiltonian() for more details. """
-        
-        lower     = float(input(f"{'variable lower bound (N * λ_crit)':<35}: "))
-        upper     = float(input(f"{'variable upper bound (N * λ_crit)':<35}: "))
-        samples   = int(input(f"{'number of trials':<35}: "))
-        
-        modifiers = [item.strip() for item in input(f"{'modifiers (csv)':<35}: ").split(',')]
-        if modifiers[0] == '': modifiers = 'Dicke'
-        
-        self.Hamiltonian(np.linspace(lower*self.crit, upper*self.crit, samples), modifiers)
+        self.var            = self.variable(var_set)       # variable array
+        self.H              = self.Hamiltonian(self.var)   # Hamiltonian matrices
         self.sort()
 
-    def Hamiltonian(self, var, modifiers='Dicke'):
+    def variable(self, var='custom'):
+        """ Creates a variable. """
+        
+        if var == 'custom':
+            lower    = float(input(f"{'variable lower bound (N * λ_crit)':<35}: "))
+            upper    = float(input(f"{'variable upper bound (N * λ_crit)':<35}: "))
+            samples  = int(input(f"{'number of trials':<35}: "))
+            return np.linspace(lower*self.crit, upper*self.crit, samples)
+        elif var == 'standard':
+            return np.linspace(1e-10, 2*self.crit, 101)
+        elif var == 'debug': 
+            return np.linspace(0, 0.1, 2)
+
+    def Hamiltonian(self, var):
         """ Creates a Hamiltonian for each variable in the set, then finds eigenstates.
         
             Parameters
             ----------
-            var       : 1D array; see calculate_states() for more details
-            modifiers : list of strings; may include 'Dicke' or 'Ising', but not both """
+            var : 1D array; see calculate_states() for more details """
 
-        # Standard Dicke
-        if 'Dicke' in modifiers:
+        # Dicke
+        if 'Dicke' in self.mod:
             H_field = self.ℏ * self.ω  * (self.a_dag @ self.a)
             H_atom  = self.ℏ * self.ω0 * self.J_z
             H_int   = self.ℏ / np.sqrt(self.N) * (self.a + self.a_dag) @ self.J_x
             H       = lambda λ: H_field + H_atom + λ*H_int
         
-        # Dicke + Ising
-        elif 'Ising' in modifiers:
+        # Ising + Dicke
+        elif 'Ising+' in self.mod:
             if self.indiv:
                 H_Ising = np.zeros_like(self.J_z)
                 for i in range(self.N):
@@ -1167,6 +1267,30 @@ class System:
             H_int   = self.ℏ / np.sqrt(self.N) * (self.a + self.a_dag) @ self.J_x
             H       = lambda λ: H_field + H_atom + H_Ising + λ*H_int
         
+        # Ising
+        elif 'Ising' in self.mod:
+            if self.indiv:
+                H_Ising = np.zeros_like(self.J_z)
+                for i in range(self.N):
+                    for j in range(self.N):
+                        if (j == i-1) or (j == i+1):
+                            H_Ising += self.J_z_list[i] @ self.J_z_list[j]
+                H_Ising = self.ℏ * self.ω0 * H_Ising
+            else:
+                H_Ising = self.ℏ * self.ω0 * self.J_z @ self.J_z
+            H_field = 0
+            H_atom  = self.ℏ * self.ω0 * self.J_z
+            H_int   = 0
+            H       = lambda λ: H_atom + λ*H_Ising
+        
+        # Huang and Hu
+        elif 'Huang' in self.mod:
+            H_field  = self.ℏ * self.ω * self.N * (self.a_dag @ self.a)
+            H_atom_z = self.ℏ * self.ω0 * self.J_z
+            H_atom_x = self.ℏ * self.ω0 * self.J_x
+            H_int    = self.ℏ * 1j * (self.a_dag - self.a) @ self.J_x
+            H        = lambda λ: H_field + λ*H_atom_x + H_atom_z + H_int
+        
         else:
             print("Try a different modifier.")
         
@@ -1174,12 +1298,14 @@ class System:
         H_list = []
         for i in range(len(var)):
             H_list.append(H(var[i]))
-        del H_field, H_atom, H_int, H
+        #del H_field, H_atom, H_int, H
         
         # Assign results to the system
         self.var   = var
         self.H      = np.array(H_list)
         self.states = calculate_states(self)
+        
+        return self.H
 
     def sort(self, sort_1=None, sort_2=None):
         """ Sorts states by eigenvalue.
@@ -1194,7 +1320,7 @@ class System:
             sort_1 = 'P'
             sort_2 = 'E'        
         
-        self.states, self.quantum_numbers = sort_by_quantum_numbers(self, sort_1, sort_2)
+        self.states, self.numbers = sort_by_quantum_numbers(self, sort_1, sort_2)
 
     def select(self, selection=None):
         """ Manages the states used for plotting and analysis.
@@ -1208,17 +1334,18 @@ class System:
         
         # Create a backup
         if (selection == 'backup') or (self.states_backup == None):
-            self.states_backup          = self.states
-            self.quantum_numbers_backup = self.quantum_numbers
+            self.states_backup  = self.states
+            self.numbers_backup = self.numbers
         
         # Restore a backup
         if (selection == 'restore') or (self.states[0].shape != self.states_backup[0].shape):
-            self.states          = self.states_backup
-            self.quantum_numbers = self.quantum_numbers_backup
+            if selection != 'super':
+                self.states  = self.states_backup
+                self.numbers = self.numbers_backup
         
         # Select states
         if (selection != None) and (selection not in options):
-            self.states, self.quantum_numbers = select_states(self, selection)
+            self.states, self.numbers = select_states(self, selection)
 
     def restore(self):
         """ A shortcut for sys.select('restore') """
@@ -1269,11 +1396,11 @@ class System:
             plot_list_n_J     = find_occupation(self)
             plot_list_entropy = find_entropy(self)
             
-            self.plot_lists = [[plot_list_E, plot_list_n_J, plot_list_entropy], self.quantum_numbers]
+            self.plot_lists = [[plot_list_E, plot_list_n_J, plot_list_entropy], self.numbers]
             
-            plot_handling(plot_list_E,       self.quantum_numbers, no_show=True)
-            plot_handling(plot_list_n_J,     self.quantum_numbers, no_show=True)
-            plot_handling(plot_list_entropy, self.quantum_numbers, no_show=True)
+            plot_handling(plot_list_E,       self.numbers, no_show=True)
+            plot_handling(plot_list_n_J,     self.numbers, no_show=True)
+            plot_handling(plot_list_entropy, self.numbers, no_show=True)
             plt.show()
         
         elif selection == 'last':
@@ -1291,23 +1418,26 @@ class System:
                 print("Individual spins can be monitored by creating System(args*, indiv=True).")
                 return
         
+        elif selection == 'Chebyshift':
+            plot_list = Chebyshift(self)
+            self.plot_lists = [[plot_list], self.numbers]
+            plot_handling(plot_list, plot_mode='3D', sys=self)
+        
         else:
-            print('Try a different keyword.')
+            print('!! Try a different keyword !!\n')
 
         # Plot calculated values
-        if selection not in ['all', 'last']:
+        if selection not in ['all', 'last', 'Chebyshift']:
             
             # Save for later
-            self.plot_lists = [[plot_list], self.quantum_numbers]
+            self.plot_lists = [[plot_list], self.numbers]
             
             # Plot
-            plot_handling(plot_list, self.quantum_numbers)
+            plot_handling(plot_list, self.numbers)
 
     def update(self):
         """ Run this every time a parameter is changed. """
         self.__init__(self.ω, self.ω0, self.n_max, self.N, self.ℏ, self.m, self.spin)
-        self.Hamiltonian(self.var)
-        self.sort('P', 'E')
     
     def save(self, filename='cache'):
         """ Save states with sys.save('filename'). """
@@ -1317,115 +1447,48 @@ class System:
 
     def print(self, data='parameters'):
         if data == 'parameters':
-            print(f"\n------------------------------------------\n"
-                  f"{'field frequency':<35}: {round(self.ω, 2):<4}|\n"
-                  f"{'atomic frequency':<35}: {round(self.ω0, 2):<4}|\n"
-                  f"{'critical coupling':<35}: {round(self.crit, 2):<4}|\n"
-                  f"{'number of modes':<35}: {self.n_max:<4}|\n"
-                  f"{'number of particles':<35}: {self.N:<4}|\n"
-                  f"------------------------------------------\n")
+            print(f"\n-------------------------------------------------------------\n"
+                  f"{'model':<35}: {self.mod:<10}\n"
+                  f"{'field frequency':<35}: {round(self.ω, 2):<4}\n"
+                  f"{'atomic frequency':<35}: {round(self.ω0, 2):<4}\n"
+                  f"{'critical coupling':<35}: {round(self.crit, 2):<4}\n"
+                  f"{'number of modes':<35}: {self.n_max:<4}\n"
+                  f"{'number of particles':<35}: {self.N:<4}\n"
+                  f"-------------------------------------------------------------\n")
         
         elif data == 'numbers':
             try:
-                print(f"\n-----------------------------------------------------------")
+                print(f"\n-------------------------------------------------------------")
                 print(f"|P, E)\t\t |P, E)\t\t |P, E)\t\t |P, E)")
-                for i in range(len(self.quantum_numbers[0])//4):
-                    print(f"|{round(self.quantum_numbers[0][4*i][0])}, {round(self.quantum_numbers[0][4*i][1], 2)})"
-                        f"\t |{round(self.quantum_numbers[0][4*i+1][0])}, {round(self.quantum_numbers[0][4*i+1][1], 2)})"
-                        f"\t |{round(self.quantum_numbers[0][4*i+2][0])}, {round(self.quantum_numbers[0][4*i+2][1], 2)})"
-                        f"\t |{round(self.quantum_numbers[0][4*i+3][0])}, {round(self.quantum_numbers[0][4*i+3][1], 2)}) |")
-                if len(self.quantum_numbers[0])/4 - len(self.quantum_numbers[0])//4 != 0:
-                    for i in range(len(self.quantum_numbers[0]) - len(self.quantum_numbers[0]//4)):
-                        print(f"|{self.quantum_numbers[0][i][0]}, {round(self.quantum_numbers[0][i][1], 2)}⟩\t")
-                print(f"-----------------------------------------------------------\n")
+                
+                if len(self.numbers[0]) <= 4:
+                    cache = f""
+                    for i in range(len(self.numbers[0])):
+                        cache += f"|{round(self.numbers[0][i][0])}, {round(self.numbers[0][i][1], 2)})\t "
+                    print(cache)
+
+                else:
+                    for i in range(len(self.numbers[0])//4):
+                        print(f"|{round(self.numbers[0][4*i][0])}, {round(self.numbers[0][4*i][1], 2)})"
+                            f"\t |{round(self.numbers[0][4*i+1][0])}, {round(self.numbers[0][4*i+1][1], 2)})"
+                            f"\t |{round(self.numbers[0][4*i+2][0])}, {round(self.numbers[0][4*i+2][1], 2)})"
+                            f"\t |{round(self.numbers[0][4*i+3][0])}, {round(self.numbers[0][4*i+3][1], 2)})")
+                    if (len(self.numbers[0])/4 - len(self.numbers[0])//4) != 0:
+                        for i in range(len(self.numbers[0]) - len(self.numbers[0]//4)):
+                            print(f"|{self.numbers[0][i][0]}, {round(self.numbers[0][i][1], 2)}⟩\t")
+                print(f"-------------------------------------------------------------\n")
             except:
                 pass
-        
         elif data == 'all numbers':
-            print(self.quantum_numbers)
+            print(self.numbers)
+
+    def project_state(self):
+        state_list = []
+        for i in rande(len(self.var)):
+            state_list.append(self.states[1][i] @ self.states[1][i].T.conj() @ self.states)
 
 ########################################################################################################################################################
 # WIP
-def Chebyshift(sys):
-    from scipy.special import jv  # Bessel function of the first kind
-    from scipy.sparse import identity, csr_matrix
-    from scipy.sparse.linalg import eigsh, LinearOperator
-    
-    def chebyshev_time_evolution(H, input_state, t, num_terms):
-    
-        # Estimate the max and min eigenvalues of H
-        E_min, E_max = eigsh(H, k=2, which='BE', return_eigenvectors=False)
-        
-        psi_cache = np.zeros_like(input_state, dtype=np.complex128)
-        input_state = psi_cache + input_state
-
-        # Scale the Hamiltonian
-        H_scaled = (2 * H - (E_max + E_min) * csr_matrix(identity(H.shape[0]))) / (E_max - E_min)
-
-        # Initial Chebyshev polynomials
-        T0 = input_state
-        T1 = H_scaled @ input_state
-        
-        # Time evolution result (initialized with the first term)
-        output_state = jv(0, t * (E_max - E_min) / 2) * T0
-        
-        # Iteratively compute higher-order terms
-        for i in range(1, num_terms):
-        
-            Tn = np.zeros(T0.shape[0], dtype=np.complex128).reshape((input_state.shape[0], 1))
-            Tn += 2 * (H_scaled @ T1) - T0
-
-            # Add the contribution of the nth term
-            output_state += (2 * (-1j)**i * jv(i, t * (E_max - E_min) / 2)) * Tn
-            
-            # Update for the next iteration
-            T0, T1 = T1, Tn
-        
-        return output_state
-  
-    # Set time parameters
-    t_max   = 1   # set time interval
-    t_shift = 0   # set start time
-    dt      = 0.01 # set time steps
-    times   = np.linspace(t_shift, t_max+t_shift, int((t_max-t_shift) / dt))
-
-    # Set iteration length
-    num_terms = 10
-
-    # Initialize data container
-    plot_list = []
-
-    # Cycle through trials
-    for i in tqdm(range(len(sys.states[1])), desc=f"{'calculating evolution':<35}"):
-        expectation_values = []
-        
-        # Cycle through states
-        for j in range(states[1][i].shape[1]):
-            expectation_values.append([])
-
-            # Extract column vector
-            state = row_to_column(sys.states[1][i][:,j])
-            
-            # Evolve state
-            for t in times:
-            
-                # Compute the time-evolved state at time t
-                state_evolved = chebyshev_time_evolution(sys.H(sys.var[i]), state, t, num_terms)
-                state_evolved = state_evolved / np.linalg.norm(state_evolved)
-                
-                # Calculate a property of the evolved state (e.g., probability |state_evolved|^2)
-                measure = expectation(sys.H(sys.var[i]), state_evolved, single_state=True)
-                
-                # Store the total measure at this time step (or any other property of interest)
-                expectation_values[j].append(measure)
-
-        expectation_values = np.array(expectation_values).T
-        plot_list.append([(f"$t,\tλ={round(sys.var[i],2)}$", f"$⟨E⟩$"), 
-                          (times, expectation_values), 
-                          (0, i), 
-                          ('plot')])
-    return plot_list
-
 def Lindbladian(sys):
     # Set time parameters
     t_max     = 1   # set time interval
@@ -1542,15 +1605,15 @@ def SEOP_Dicke_model():
 
     # Sort eigenstates and eigenvalues
     sort_dict = {'P': P, 'E': H, 'S_z': S_z}
-    states, quantum_numbers = sort_by_quantum_numbers(states, sort='P', secondary_sort='E')
+    states, numbers = sort_by_quantum_numbers(states, sort='P', secondary_sort='E')
 
     # Define custom plotting
-    def SEOP_occupation(var, states, quantum_numbers):
+    def SEOP_occupation(var, states, numbers):
     
         # Select specific eigenstates
         selected_states = [0, int(len(states[0][0])/2)]
         states          = [states[0][:,selected_states], states[1][:,:,selected_states]]
-        quantum_numbers = quantum_numbers[:,selected_states]
+        numbers = numbers[:,selected_states]
     
         n_expectations   = expectation(a_dag@a, states)
         J_x_expectations = expectation(I_z,     states)
@@ -1562,10 +1625,10 @@ def SEOP_Dicke_model():
         return plot_list
     
     # Make a calculation
-    spectrum_plot_list   = find_spectrum(var, states, quantum_numbers)
-    occupation_plot_list = SEOP_occupation(var, states, quantum_numbers)
-    plot_handling(spectrum_plot_list,   quantum_numbers)
-    plot_handling(occupation_plot_list, quantum_numbers)
+    spectrum_plot_list   = find_spectrum(var, states, numbers)
+    occupation_plot_list = SEOP_occupation(var, states, numbers)
+    plot_handling(spectrum_plot_list,   numbers)
+    plot_handling(occupation_plot_list, numbers)
 
 def two_spin_Dicke_model():
     """ Spin-exchange optical pumping model
@@ -1631,15 +1694,15 @@ def two_spin_Dicke_model():
 
     # Sort eigenstates and eigenvalues
     sort_dict = {'P': P, 'E': H, 'S_z': S_z, 'n': a_dag@a}
-    states, quantum_numbers = sort_by_quantum_numbers(states, sort='P', secondary_sort='E')
+    states, numbers = sort_by_quantum_numbers(states, sort='P', secondary_sort='E')
 
     # Define custom plotting
-    def plot_n_S(var, states, quantum_numbers):
+    def plot_n_S(var, states, numbers):
     
         # Select specific eigenstates
         selected_states = [0, int(len(states[0][0])/2)]
         states          = [states[0][:,selected_states], states[1][:,:,selected_states]]
-        quantum_numbers = quantum_numbers[:,selected_states]
+        numbers = numbers[:,selected_states]
     
         n_expectations   = expectation(a_dag@a, states)
         J_x_expectations = expectation(I_z,     states)
@@ -1648,11 +1711,11 @@ def two_spin_Dicke_model():
         plot_handling([[(f"$λ$", f"$⟨n⟩$"),   (var, n_expectations),   (0, 1), ('plot')],
                       [(f"$λ$", f"$⟨I_z⟩$"), (var, J_x_expectations), (1, 0), ('plot')],
                       [(f"$λ$", f"$⟨J_z⟩$"), (var, J_z_expectations), (1, 2), ('plot')]],
-                      quantum_numbers = quantum_numbers)
+                      numbers = numbers)
     
     # Make a calculation
-    #find_spectrum(var, states, quantum_numbers)
-    plot_n_S(var, states, quantum_numbers)
+    #find_spectrum(var, states, numbers)
+    plot_n_S(var, states, numbers)
 
 ########################################################################################################################################################
 # Main
