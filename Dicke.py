@@ -222,8 +222,8 @@ def create_parity_operator(sys):
     field_parity = expm(1j * np.pi * sys.a_dag_field @ sys.a_field)
     spin_parity  = expm(1j * np.pi * sys.J_z_spin)
     
-    P = np.real(np.kron(field_parity, spin_parity))
-    return tolerance_check(P)
+    P = tolerance_check(np.kron(field_parity, spin_parity))
+    return P
 
 def compute_tensor_products(sys):
     """ Takes the tensor product of the field and atom operators and yields the full Hamiltonian.
@@ -605,10 +605,6 @@ def examples(specific_example):
         number_of_atoms       = 4
         sys = System(field_frequency, atomic_frequency, number_of_field_modes, number_of_atoms)
 
-        # Generate eigenstates and eigenvalues
-        var = np.linspace(1e-10, sys.crit, 101)
-        sys.Hamiltonian(var)
-
         # Sort eigenstates and eigenvalues
         sys.sort()
 
@@ -622,16 +618,13 @@ def examples(specific_example):
     elif specific_example == 2:
     
         # Initialize model
-        sys = System(0.1, 10, 24, 2)
-
-        # Generate eigenstates and eigenvalues
-        sys.Hamiltonian(np.linspace(1e-10, 2*sys.crit, 101))
+        sys = System(0.1, 10, 24, 2, var_set='standard')
         
         # Sort eigenstates and eigenvalues
         sys.sort()
 
         # Select specific eigenstates
-        sys.select(set_selection='ground')
+        sys.select('ground')
 
         # Make a calculation
         sys.plot('occupation')
@@ -643,10 +636,7 @@ def examples(specific_example):
     elif specific_example == 3:
     
         # Initialize model
-        sys = System(0.1, 10, 48, 4)
-
-        # Omit this in the command line
-        sys.Hamiltonian(np.linspace(1e-10, 3*sys.crit, 101))
+        sys = System(0.1, 10, 48, 4, var_set='standard')
 
         # Sort eigenstates and eigenvalues
         sys.sort('P', 'E')
@@ -690,14 +680,14 @@ def examples(specific_example):
         sys.plot('spins')
     
     # Ising + Dicke model
-    elif specific_example == 6:
+    elif specific_example == 7:
     
         sys = System(1, 1, 4, 4, var_set='standard', mod='Ising+')
         sys.select([0, 1])
         sys.plot()
     
     # Development: bifurcations
-    elif specific_example == 5:
+    elif specific_example == 8:
     
         # Set parameters
         ω, ω0      = 0.1, 10
@@ -727,7 +717,7 @@ def examples(specific_example):
         plot_handling(plot_list, numbers)
     
     # Development: Chebyshev evolution
-    elif specific_example == 6:
+    elif specific_example == 9:
     
         # Set parameters
         ω, ω0      = 0.1, 10
@@ -753,7 +743,7 @@ def examples(specific_example):
         plot_handling(plot_list, numbers, plot_mode="3D")
 
     # Development: Lindbladian evolution
-    elif specific_example == 7:
+    elif specific_example == 10:
     
         # Set parameters
         ω, ω0    = 0.1, 10
@@ -779,7 +769,7 @@ def examples(specific_example):
         plot_handling(plot_list, numbers, plot_mode="3D")
 
     # Development: SEOP
-    elif specific_example == 8:
+    elif specific_example == 11:
         SEOP_Dicke_model()
 
     else:
@@ -1148,7 +1138,7 @@ class System:
             system_instance = pickle.load(file)
         return system_instance
 
-    def __init__(self, ω=1, ω0=1, n_max=2, N=1, ℏ=1, m=1, spin=1/2, var_set='custom', indiv=False, mod='Dicke'):
+    def __init__(self, ω=1, ω0=1, n_max=2, N=2, ℏ=1, m=1, spin=1/2, var_set='custom', indiv=False, mod='Dicke'):
         """ Initializes operators and parameters.
         
             Parameters
@@ -1233,7 +1223,7 @@ class System:
             samples  = int(input(f"{'number of trials':<35}: "))
             return np.linspace(lower*self.crit, upper*self.crit, samples)
         elif var == 'standard':
-            return np.linspace(1e-10, 2*self.crit, 101)
+            return np.linspace(0.01, 2*self.crit, 101)
         elif var == 'debug': 
             return np.linspace(0, 0.1, 2)
 
@@ -1285,11 +1275,18 @@ class System:
         
         # Huang and Hu
         elif 'Huang' in self.mod:
+            self.m = 1.44 * 1e-25
+            lamb = 804.1 * 1e-9
+            self.ω = 2 * np.pi * 50
+            self.ℏ = 6.6 * 1e-34
+            gamma = np.sqrt(2) * np.pi * self.ℏ / (self.m * lamb)
+            coeff = 1j * gamma * np.sqrt(2 * self.m * self.ℏ * self.ω)
+
             H_field  = self.ℏ * self.ω * self.N * (self.a_dag @ self.a)
+            #H_atom_x = self.ℏ * self.ω0 * self.J_x
             H_atom_z = self.ℏ * self.ω0 * self.J_z
-            H_atom_x = self.ℏ * self.ω0 * self.J_x
-            H_int    = self.ℏ * 1j * (self.a_dag - self.a) @ self.J_x
-            H        = lambda λ: H_field + λ*H_atom_x + H_atom_z + H_int
+            H_int    = coeff * (self.a_dag - self.a) @ self.J_z
+            H        = lambda λ: H_field + λ*H_atom_z + H_int
         
         else:
             print("Try a different modifier.")
